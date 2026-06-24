@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Databricks / IDE
+.databricks/
+.vscode/
+*.bundle/
+.databricks-login.json
+
+# Raw data artifacts (these live in the UC Volume, not in Git — see CONTRIBUTING.md)
+data/raw/
+*.ndjson

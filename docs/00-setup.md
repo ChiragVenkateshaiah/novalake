@@ -82,14 +82,16 @@ novalake (catalog)
   the workspace admin (you, on Free Edition).
 
 ## 9. Validation & Acceptance Criteria
-- [ ] `SHOW CATALOGS` includes `novalake`
-- [ ] `SHOW SCHEMAS IN novalake` returns `bronze, silver, gold, serving`
-- [ ] `SHOW VOLUMES IN novalake.bronze` returns `landing`
-- [ ] Both raw files visible under `/Volumes/novalake/bronze/landing/`
-- [ ] Git folder shows clean status against `main` in the Databricks UI
+- [x] `SHOW CATALOGS` includes `novalake`
+- [x] `SHOW SCHEMAS IN novalake` returns `bronze, silver, gold, serving`
+- [x] `SHOW VOLUMES IN novalake.bronze` returns `landing`
+- [x] Both raw files visible under `/Volumes/novalake/bronze/landing/`
+- [x] Git folder shows clean status against `main` in the Databricks UI
 
 ## 10. Key Takeaways
-_Fill in after running this end-to-end._
+- Free Edition gives you full workspace-admin rights on your own metastore - `CREATE CATALOG` worked directly, no fallback to an existing default catalog needed.
+- Unity Catalog Volumes are the governed landing zone for files-as-files; tables come later, in Bronze - the volume itself stores zero schema.
+- The 5,296,607 / 8,086,444 byte sizes matched the generator's output exactly, confirming a clean upload with no truncation.
 
 ## 11. Knowledge Check
 - Q1: Why a Volume and not just `dbfs:/FileStore` for the raw files?

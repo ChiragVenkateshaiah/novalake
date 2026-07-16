@@ -26,10 +26,12 @@ it directly via `dbt_profiles/profiles.yml` (`host`/`http_path` from
 for orchestrated and eventually scheduled/CI-triggered runs — not the primary
 development loop.
 
-Auth uses `auth_type: databricks-cli` rather than a static token — confirmed via
-`databricks auth describe -p DEFAULT` that the existing CLI profile is already
-OAuth (`databricks-cli`), so dbt-databricks reuses that cached session directly.
-No PAT to generate, store, or rotate.
+Auth uses `auth_type: oauth` rather than a static token — `databricks auth
+describe -p DEFAULT` confirmed the CLI's own profile is already OAuth
+(`databricks-cli` auth type). dbt-databricks doesn't accept that literal value
+(found via `dbt debug` failing with "auth_type: oauth is required"), but `oauth`
+shares the same token cache (`~/.databricks/token-cache.json`) and reused the
+existing session with no new browser flow. No PAT to generate, store, or rotate.
 
 ## Consequences
 
@@ -42,10 +44,16 @@ No PAT to generate, store, or rotate.
   schemas — no separate "local sandbox" schema exists yet. Acceptable for a
   solo project at this phase; worth revisiting if this becomes a concern later
   (e.g. a per-developer schema suffix).
-- The job's `dbt_task` omits `profiles_directory` on the assumption that a
-  job-managed dbt task auto-generates its own Databricks auth. `bundle validate`
-  only checks config shape, not this runtime behavior — confirmed on the first
-  real `databricks bundle run`, not asserted as settled by this ADR alone.
+- The job's `dbt_task` omits `profiles_directory`, on the assumption that a
+  job-managed dbt task auto-generates its own Databricks auth — **confirmed** by
+  a real `databricks bundle run`: auth was never the problem. What the first real
+  run *did* surface, which no amount of `bundle validate` would have caught:
+  serverless environments don't ship `dbt` preinstalled. The `dbt_task`'s
+  `environment_key` needs `dbt-databricks` declared explicitly under
+  `spec.dependencies` (see `resources/dbt_job.yml`), or `dbt run` fails with
+  exit 127 ("command not found"). Split into its own `dbt_env` environment,
+  separate from `bronze_ingest`'s `pyspark_env`, so the PySpark task doesn't
+  carry an unused dbt dependency.
 
 ## Alternatives considered
 

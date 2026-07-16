@@ -245,3 +245,20 @@ Warehouse ID (`8fd481cbf45ac93e`) and CLI profile (`DEFAULT`) were confirmed via
 the Databricks MCP tools and `databricks auth profiles` rather than by reading
 `~/.databrickscfg` directly. See `docs/adr/` for the formal decision records this
 plan produced, and `docs/checkpoint.md` for the narrative ADR this plan revises.
+
+**Local dbt run (2026-07-16):** `dbt debug`/`run`/`test` all passed against the
+real warehouse. Found and fixed along the way: `auth_type: oauth` (not
+`databricks-cli` — dbt-databricks doesn't accept that literal, but reuses the
+same CLI token cache), and a deprecated `accepted_values` test-argument shape.
+`bronze_rows == silver_rows` (7105 == 7105).
+
+**Real DAB job run (2026-07-16):** `databricks bundle deploy` + `bundle run
+novalake_medallion` — first attempt failed: `dbt_silver_gold` hit exit 127
+("command not found"). The job-managed `dbt_task` auto-generates auth as
+assumed (that part was never the problem), but serverless environments don't
+ship `dbt` preinstalled — needed `dbt-databricks` declared explicitly under the
+task's `environment_key`. Split into a dedicated `dbt_env` (separate from
+`bronze_ingest`'s `pyspark_env`), redeployed, reran: `TERMINATED SUCCESS`,
+`bronze_ingest` wrote 7105 rows, `dbt_silver_gold` completed (dbt exits non-zero
+on test failure, so this confirms all 3 tests too). Row counts reconfirmed equal
+post-run. This closes the last open assumption from ADR-0004.

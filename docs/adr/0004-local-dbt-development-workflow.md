@@ -20,18 +20,24 @@ change defeats the tool's own design.
 ## Decision
 
 Install dbt locally (`requirements-dbt.txt`, `dbt-databricks`) and develop against
-it directly via `dbt_profiles/profiles.yml` (`env_var()`-based: `DATABRICKS_HOST`,
-`DATABRICKS_HTTP_PATH`, `DATABRICKS_TOKEN`), targeting the same `novalake.silver`/
-`novalake.gold` schemas the job writes to. The DAB `dbt_task` is for orchestrated
-and eventually scheduled/CI-triggered runs — not the primary development loop.
+it directly via `dbt_profiles/profiles.yml` (`host`/`http_path` from
+`DATABRICKS_HOST`/`DATABRICKS_HTTP_PATH` env vars), targeting the same
+`novalake.silver`/`novalake.gold` schemas the job writes to. The DAB `dbt_task` is
+for orchestrated and eventually scheduled/CI-triggered runs — not the primary
+development loop.
+
+Auth uses `auth_type: databricks-cli` rather than a static token — confirmed via
+`databricks auth describe -p DEFAULT` that the existing CLI profile is already
+OAuth (`databricks-cli`), so dbt-databricks reuses that cached session directly.
+No PAT to generate, store, or rotate.
 
 ## Consequences
 
-- Local dbt needs three env vars set (`DATABRICKS_HOST`, `DATABRICKS_HTTP_PATH`,
-  `DATABRICKS_TOKEN`) pointed at the same SQL warehouse the bundle uses
-  (`8fd481cbf45ac93e`, "Serverless Starter Warehouse") — one-time setup per
-  machine, not committed (credentials never go in `dbt_profiles/profiles.yml`
-  itself, only `env_var()` references).
+- Local dbt needs two env vars set (`DATABRICKS_HOST`, `DATABRICKS_HTTP_PATH`)
+  pointed at the same SQL warehouse the bundle uses (`8fd481cbf45ac93e`,
+  "Serverless Starter Warehouse") — one-time setup per machine. No token env var,
+  no secret in `dbt_profiles/profiles.yml` at all; auth flows through the
+  `databricks` CLI's own credential cache.
 - Local dev and the job both write to the same `novalake.silver`/`novalake.gold`
   schemas — no separate "local sandbox" schema exists yet. Acceptable for a
   solo project at this phase; worth revisiting if this becomes a concern later

@@ -7,7 +7,10 @@ novalake:
       schema: silver
       host: "{{ env_var('DATABRICKS_HOST') }}"
       http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
-      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      # No static token: OAuth U2M, sharing the same token cache the
+      # `databricks` CLI itself uses (~/.databricks/token-cache.json) — should
+      # reuse the existing CLI session rather than opening a new browser flow.
+      auth_type: oauth
       threads: 4
       # prod output added at v0.5 (CI/CD), alongside the service-principal deploy
       # it actually requires — not pre-scaffolded here.

@@ -29,3 +29,4 @@ data/raw/
 src/dbt/target/
 src/dbt/dbt_packages/
 src/dbt/logs/
+dbt_profiles/.user.yml

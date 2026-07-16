@@ -1,9 +1,12 @@
 # NovaLake
 
-A hands-on Databricks lakehouse build, end to end: raw event data → Bronze → Silver →
-Gold → Serving → orchestration (Jobs, then Declarative Pipelines) → a GenAI layer on
-top of the same curated data. Built on **Databricks Free Edition**, documented as it's
-built, every transformation and decision versioned in this repo.
+A hands-on Databricks lakehouse build, end to end: raw event data → Bronze (PySpark)
+→ Silver → Gold (dbt) → Serving (Genie) → a GenAI layer on top of the same curated
+data — orchestrated by a Databricks Asset Bundle (DAB) from the first phase onward,
+deployed via CLI now and CI/service-principal later. Lakeflow Declarative Pipelines
+is a later, comparative learning phase (`v0.7`), not the primary Silver/Gold path —
+see `docs/checkpoint.md` for why. Built on **Databricks Free Edition**, documented
+as it's built, every transformation and decision versioned in this repo.
 
 NovaLake is the analytical/AI counterpart to **[NovaPay](#)** (a separate
 production-style payments platform project) — NovaPay generates the operational
@@ -22,37 +25,43 @@ agentic tooling (Claude Code + Databricks MCP) enters this build.
 
 ```mermaid
 flowchart LR
-    subgraph Raw
-        A[payments_events.json<br/>NDJSON]
-        B[payments_events_multiline.json<br/>nested API export]
+    subgraph Raw["Raw · Unity Catalog Volume"]
+        A["payments_events.json<br/>NDJSON"]
+        B["payments_events_multiline.json<br/>nested API export"]
     end
     subgraph Lakehouse
-        C[(Bronze<br/>raw, as-is)]
-        D[(Silver<br/>conformed, exploded)]
-        E[(Gold<br/>business metrics)]
-        F[(Serving<br/>dashboards, Genie)]
+        C[("Bronze<br/>PySpark · src/ingest.py")]
+        D[("Silver<br/>dbt · src/dbt/")]
+        E[("Gold<br/>dbt · src/dbt/")]
+        F[("Serving<br/>Genie + dashboards")]
     end
-    G[GenAI layer<br/>Vector Search + Agent]
+    G["GenAI layer<br/>Vector Search + Agent Bricks"]
 
     A --> C
-    B --> C
+    B -.not yet ingested.-> C
     C --> D --> E --> F
     F --> G
 ```
+
+Bronze → Silver/Gold → Serving is orchestrated as one Databricks Asset Bundle job
+from `v0.1` onward (`databricks.yml`, `resources/dbt_job.yml`). See
+[`docs/architecture.md`](docs/architecture.md) for the DAB job graph and the
+local-dev-vs-orchestrated-run split, and [`docs/adr/`](docs/adr/) for the decision
+records behind this shape.
 
 ## Roadmap
 
 | Tag | Phase | What it builds | Learn |
 |-----|-------|-----------------|-------|
 | `v0.0` | Setup | Catalog, schemas, volume, Git folder | Workspace, Unity Catalog basics |
-| `v0.1` | Bronze | Raw ingest of the NDJSON file, as-is | Ingestion, schema-on-read |
-| `v0.2` | Silver | Explode/flatten the multiline file, drift reconciliation, dedupe, DLQ | Real PySpark/SQL transformation |
-| `v0.3` | Gold | Business metrics, conformed dimensions | Aggregation, dimensional modeling |
-| `v0.4` | Serving | Dashboard/feature tables, Genie space | Serving patterns, AI/BI |
-| `v0.5` | Lakeflow Jobs | Bronze→Gold→Serving as a scheduled DAG | Orchestration |
-| `v0.6` | Declarative Pipelines | Migrate Jobs DAG, add expectations | Declarative ETL, DQ-as-code |
-| `v0.7` | GenAI | Vector Search + Agent Bricks support-assist RAG, text-to-SQL | RAG, agents, eval |
-| — | Cross-cutting | Unity Catalog governance, observability, DAB/CI | Continuous, from v0.5 onward |
+| `v0.1` | Bronze | `src/ingest.py` PySpark ingest, wrapped in a DAB job resource | Ingestion, schema-on-read, DAB from day one |
+| `v0.2` | Silver | dbt models + tests: explode/flatten, drift reconciliation, dedupe, DLQ | Real PySpark/SQL transformation, dbt |
+| `v0.3` | Gold | dbt models: business metrics, conformed dimensions | Aggregation, dimensional modeling |
+| `v0.4` | Serving | Genie space on Gold, dashboard/feature tables | Serving patterns, AI/BI |
+| `v0.5` | CI/CD | GitHub Actions, service-principal deploy, `bundle validate` gate, `prod` target | Continuous deployment |
+| `v0.6` | GenAI | Vector Search + Agent Bricks support-assist RAG, text-to-SQL | RAG, agents, eval |
+| `v0.7` | Declarative Pipelines (compare) | Re-implement part of Gold with Lakeflow Declarative Pipelines | Declarative ETL, DQ-as-code, vs. dbt |
+| — | Cross-cutting | Unity Catalog governance, observability | Continuous, from `v0.1` onward |
 
 Each tag = a tagged GitHub release: the table/asset works, the logic is committed,
 the doc module is filled, and the validation checklist is green.
@@ -63,23 +72,31 @@ the doc module is filled, and the validation checklist is green.
 novalake/
 ├── README.md
 ├── CONTRIBUTING.md
+├── databricks.yml         # Asset Bundle root — dev target (prod added at v0.5)
+├── resources/
+│   └── dbt_job.yml        # bronze ingest task -> dbt_task (Silver/Gold)
+├── src/
+│   ├── ingest.py           # PySpark: land + flatten the raw JSON (Bronze)
+│   └── dbt/                # dbt project: Silver/Gold models + tests
+├── dbt_profiles/
+│   └── profiles.yml       # env_var()-based, local dbt dev only
+├── requirements-dbt.txt   # dbt-databricks pin, local dev only
 ├── data/
 │   ├── generators/        # synthetic dataset generators (reproducible)
 │   └── dictionaries/      # what's in the data + the deliberate challenges
-├── notebooks/             # transformation logic, one folder per phase
+├── notebooks/             # historical: the original hand-run v0.1 Bronze notebook
 ├── docs/
 │   ├── checkpoint.md      # pinned process decisions (e.g. agentic integration timing)
 │   ├── _skeleton.md        # reusable doc module template
 │   └── 00-setup.md, ...    # one filled module per phase
-├── pipelines/             # Lakeflow Declarative Pipeline source (from v0.6)
-├── resources/             # Databricks Asset Bundle resource defs (from v0.5)
-├── sql/                   # reusable SQL: gold metrics, serving views (from v0.3)
-└── databricks.yml         # Asset Bundle root (from v0.5)
+├── pipelines/             # Lakeflow Declarative Pipeline source (from v0.7, comparative)
+└── .github/workflows/     # CI (from v0.5, deploys via service principal)
 ```
-Folders not yet needed (`pipelines/`, `resources/`, `sql/`, `databricks.yml`) are
-created when their phase starts, not pre-scaffolded — see `docs/checkpoint.md` for
-the reasoning.
+`pipelines/` and `.github/workflows/` aren't created yet — added when their phase
+starts, not pre-scaffolded. See `docs/checkpoint.md` for the DAB/dbt timing
+decisions and why `pipelines/` moved from `v0.6` to a later comparative phase.
 
 ## Status
 
-🚧 `v0.0` in progress.
+🚧 `v0.0`–`v0.1` scaffolding in place (DAB + dbt wiring); Silver/Gold modeling not
+yet started.

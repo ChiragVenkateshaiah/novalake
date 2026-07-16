@@ -81,7 +81,13 @@ explode/flatten work that follows it.
 - Write mode is `overwrite` for this static, one-time batch load — safe to re-run,
   fully replaces the table from the current source file each time. Will change to
   an incremental/idempotent pattern (`COPY INTO` or Auto Loader) once this becomes
-  a scheduled Job in `v0.5` — noted here, not solved here.
+  a scheduled Job — noted here, not solved here.
+- **Architecture pivot (2026-07-16):** this notebook's logic now also exists as
+  `src/ingest.py`, a job-driven PySpark script with the identical read/transform/
+  write behavior, wrapped in `resources/dbt_job.yml` as a DAB `spark_python_task`.
+  See `docs/checkpoint.md`'s "Revised decision." This notebook stays in place as
+  the historical, hand-run `v0.1` record — it is not deleted or superseded for
+  validation purposes, just no longer the forward path for scheduled runs.
 - The shape-audit tool has real, documented blind spots — see §4's "type-vs-type"
   and "drift that isn't collapse" cases. It's one tool for one category of problem,
   not a complete Bronze health check.
@@ -151,3 +157,4 @@ explode/flatten work that follows it.
 | v0.1 | Module created, ingestion notebook run, table validated | Chirag + Claude |
 | v0.1 | Schema-drift audit tool built, case-sensitivity bug found and fixed | Chirag + Claude |
 | v0.1 | Module completed and validated | Chirag + Claude |
+| 2026-07-16 | Architecture pivot: notebook logic ported to `src/ingest.py`, wrapped in a DAB job resource. Notebook kept as historical record. | Chirag + Claude |

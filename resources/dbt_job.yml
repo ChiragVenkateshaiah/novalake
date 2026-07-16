@@ -1,0 +1,36 @@
+resources:
+  jobs:
+    novalake_medallion:
+      name: "[${bundle.target}] novalake bronze-to-silver"
+      tasks:
+        - task_key: bronze_ingest
+          environment_key: default_env
+          spark_python_task:
+            python_file: ../src/ingest.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+
+        - task_key: dbt_silver_gold
+          depends_on:
+            - task_key: bronze_ingest
+          environment_key: default_env
+          dbt_task:
+            project_directory: ../src/dbt
+            commands:
+              # No `dbt deps` — no packages.yml exists yet, it would be a no-op.
+              # Add it back if/when a package is actually used.
+              - "dbt run"
+              - "dbt test"
+            catalog: "${var.catalog}"
+            schema: "silver"
+            warehouse_id: "${var.warehouse_id}"
+          # No profiles_directory — a job-managed dbt_task is expected to
+          # auto-generate Databricks auth for dbt. `bundle validate` only checks
+          # config shape, not this runtime behavior — confirm on the first real
+          # `databricks bundle run novalake_medallion`.
+
+      environments:
+        - environment_key: default_env
+          spec:
+            client: "4"

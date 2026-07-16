@@ -2,7 +2,10 @@ version: 2
 
 sources:
   - name: bronze
-    database: novalake
+    # No hardcoded `database:` — defaults to target.database, which already
+    # tracks the same `catalog` bundle variable src/ingest.py and the DAB
+    # dbt_task both use. Hardcoding it here would silently decouple this
+    # source from that variable if it's ever overridden.
     schema: bronze
     tables:
       - name: raw_events

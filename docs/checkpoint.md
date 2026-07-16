@@ -24,6 +24,12 @@ directly?
 
 ## The decision
 
+> **2026-07-16:** the *timing* below was revised — see "Revised decision" further
+> down this file. The principle stated here (no agent-authored IaC until its
+> author has written the equivalent by hand) still governs; only when DAB
+> itself was introduced changed. Read this section as history, not current
+> status.
+
 **Not yet.** Agent involvement in the orchestration/IaC layer is deferred until:
 
 1. `v0.5` is done by hand — a real `databricks.yml` and job resources, hand-written,

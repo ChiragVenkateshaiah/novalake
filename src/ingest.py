@@ -34,6 +34,11 @@ def main() -> None:
         .withColumn("_source_file", F.col("_metadata.file_path"))
         .withColumn("_ingested_at", F.current_timestamp())
     )
+    # No .cache() here: Databricks serverless compute does not support
+    # persist()/cache() (confirmed the hard way — job failed with
+    # NOT_SUPPORTED_WITH_SERVERLESS). The count() below re-reading the source
+    # is a real but tiny cost at this dataset's size (~7K rows); not worth a
+    # workaround given serverless forecloses the obvious one.
 
     (bronze_df.write
         .format("delta")

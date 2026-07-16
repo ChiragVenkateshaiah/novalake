@@ -9,11 +9,9 @@ variables:
     description: Unity Catalog catalog all Bronze/Silver/Gold objects live in.
     default: novalake
   warehouse_id:
-    description: >
-      SQL warehouse ID used by the dbt_task ("Serverless Starter Warehouse",
-      confirmed via `databricks warehouses list` — this is the hex id, not the
-      display name).
-    default: "8fd481cbf45ac93e"
+    description: SQL warehouse used by the dbt_task.
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
 
 targets:
   dev:

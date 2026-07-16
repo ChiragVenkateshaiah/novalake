@@ -54,8 +54,8 @@ What `databricks bundle deploy` actually creates, per `resources/dbt_job.yml`:
 flowchart TB
     subgraph Bundle["databricks.yml — bundle: novalake, target: dev"]
         subgraph Job["Job: novalake_medallion"]
-            T1["Task: bronze_ingest<br/>spark_python_task → src/ingest.py<br/>environment_key: default_env (serverless)"]
-            T2["Task: dbt_silver_gold<br/>dbt_task → src/dbt (dbt run, dbt test)<br/>environment_key: default_env (serverless)<br/>depends_on: bronze_ingest"]
+            T1["Task: bronze_ingest<br/>spark_python_task → src/ingest.py<br/>environment_key: pyspark_env (serverless)"]
+            T2["Task: dbt_silver_gold<br/>dbt_task → src/dbt (dbt run, dbt test)<br/>environment_key: dbt_env (serverless, dbt-databricks dependency)<br/>depends_on: bronze_ingest"]
             T1 --> T2
         end
     end

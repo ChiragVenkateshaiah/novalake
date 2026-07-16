@@ -46,7 +46,7 @@ deploy` — deploys stay manual/reviewed per `checkpoint.md`'s remaining princip
 
 ```
 novalake/
-├── databricks.yml              # NEW — bundle root, dev/prod targets
+├── databricks.yml              # NEW — bundle root, dev target only (see Context above)
 ├── resources/
 │   └── dbt_job.yml             # NEW — job: bronze ingest task -> dbt_task
 ├── src/
@@ -262,3 +262,24 @@ task's `environment_key`. Split into a dedicated `dbt_env` (separate from
 `bronze_ingest` wrote 7105 rows, `dbt_silver_gold` completed (dbt exits non-zero
 on test failure, so this confirms all 3 tests too). Row counts reconfirmed equal
 post-run. This closes the last open assumption from ADR-0004.
+
+**Multi-agent review before merge (2026-07-16):** 8 parallel finder agents
+(correctness ×3, reuse/simplification/efficiency, altitude, CLAUDE.md/
+CONTRIBUTING.md conventions) reviewed the full PR diff. Verified against the
+actual files and fixed: a stale `docs/architecture.md` diagram still showing
+`default_env` after the job was split into `pyspark_env`/`dbt_env`; a hardcoded
+`database: novalake` in `_sources.yml` that only worked by coincidence with the
+`catalog` variable's default; an internal contradiction in this file's own
+repo-structure comment ("dev/prod targets") against its Context section
+("dev-only"); `docs/checkpoint.md`'s "The decision" section not pointing
+readers to "Revised decision"; and `databricks.yml`'s `warehouse_id` hardcoded
+to a hex ID instead of the documented `lookup:`-by-name pattern.
+
+One fix attempt was wrong and had to be reverted: adding `.cache()` in
+`src/ingest.py` to avoid a redundant read for the trailing `count()` — sound
+reasoning on classic clusters, but **Databricks serverless compute does not
+support `persist()`/`cache()` at all** (`NOT_SUPPORTED_WITH_SERVERLESS`),
+confirmed by a real job failure, not caught by `bundle validate` or local dbt.
+Reverted; the double-read stays, accepted as a negligible cost at this
+dataset's size. Re-ran the full job after every fix — `TERMINATED SUCCESS`,
+row counts reconfirmed equal both locally and via the job, both times.

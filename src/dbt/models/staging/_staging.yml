@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: stg_raw_events
+    description: >
+      Pass-through view over `novalake.bronze.raw_events` — first proof that dbt
+      can read what src/ingest.py lands. No flattening or drift-fixing here.
+    columns:
+      - name: event_id
+        description: >
+          Envelope event id. NOT unique — ~1.5% intentional replayed IDs exist
+          upstream by design; dedup is real Silver work, not tested here.
+        tests:
+          - not_null
+      - name: event_type
+        tests:
+          - not_null
+      - name: schema_version
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["1.0", "2.0"]

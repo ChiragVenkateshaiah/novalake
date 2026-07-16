@@ -1,0 +1,20 @@
+name: 'novalake'
+version: '1.0.0'
+config-version: 2
+
+profile: 'novalake'
+require-dbt-version: [">=1.8.0", "<2.0.0"]
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  novalake:
+    staging:
+      # dbt's "staging" convention and the project's "Silver" medallion layer are
+      # treated as the same thing here, on purpose — not a naming oversight.
+      +schema: silver
+      +materialized: view

@@ -16,6 +16,17 @@ Thumbs.db
 *.bundle/
 .databricks-login.json
 
+# Claude Code local tooling (not project deliverables)
+.claude/
+.ai-dev-kit/
+.mcp.json
+
 # Raw data artifacts (these live in the UC Volume, not in Git — see CONTRIBUTING.md)
 data/raw/
 *.ndjson
+
+# dbt
+src/dbt/target/
+src/dbt/dbt_packages/
+src/dbt/logs/
+dbt_profiles/.user.yml

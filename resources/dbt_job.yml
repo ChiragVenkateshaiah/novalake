@@ -1,0 +1,43 @@
+resources:
+  jobs:
+    novalake_medallion:
+      name: "[${bundle.target}] novalake bronze-to-silver"
+      tasks:
+        - task_key: bronze_ingest
+          environment_key: pyspark_env
+          spark_python_task:
+            python_file: ../src/ingest.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+
+        - task_key: dbt_silver_gold
+          depends_on:
+            - task_key: bronze_ingest
+          environment_key: dbt_env
+          dbt_task:
+            project_directory: ../src/dbt
+            commands:
+              # No `dbt deps` — no packages.yml exists yet, it would be a no-op.
+              # Add it back if/when a package is actually used.
+              - "dbt run"
+              - "dbt test"
+            catalog: "${var.catalog}"
+            schema: "silver"
+            warehouse_id: "${var.warehouse_id}"
+          # No profiles_directory — confirmed via a real `bundle run`: a
+          # job-managed dbt_task does auto-generate Databricks auth. What it
+          # does NOT do is install dbt itself — serverless environments don't
+          # ship dbt preinstalled, hence the dbt-databricks dependency below
+          # (found the hard way: first real run failed with exit 127, "command
+          # not found").
+
+      environments:
+        - environment_key: pyspark_env
+          spec:
+            client: "4"
+        - environment_key: dbt_env
+          spec:
+            client: "4"
+            dependencies:
+              - "dbt-databricks>=1.8,<2.0"

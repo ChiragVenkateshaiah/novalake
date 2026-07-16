@@ -1,0 +1,26 @@
+bundle:
+  name: novalake
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog all Bronze/Silver/Gold objects live in.
+    default: novalake
+  warehouse_id:
+    description: SQL warehouse used by the dbt_task.
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      # Confirmed via `databricks auth profiles` — DEFAULT is valid and points
+      # at this workspace.
+      profile: DEFAULT
+  # prod target intentionally not scaffolded yet — added at v0.5 (CI/CD),
+  # alongside the service-principal deploy it actually requires. Adding it now
+  # would pre-scaffold ahead of the phase that needs it (see docs/checkpoint.md).

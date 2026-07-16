@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: bronze
+    # No hardcoded `database:` — defaults to target.database, which already
+    # tracks the same `catalog` bundle variable src/ingest.py and the DAB
+    # dbt_task both use. Hardcoding it here would silently decouple this
+    # source from that variable if it's ever overridden.
+    schema: bronze
+    tables:
+      - name: raw_events
+        description: >
+          Raw polymorphic event envelope landed as-is by src/ingest.py from
+          payments_events.json. No transformation applied at this layer.

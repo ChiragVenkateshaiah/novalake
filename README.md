@@ -98,7 +98,9 @@ decisions and why `pipelines/` moved from `v0.6` to a later comparative phase.
 
 ## Status
 
-🚧 `v0.2` in progress — Silver `transaction.*` slice landed (dedupe, envelope +
-payload drift-fix, DLQ split, line-items explode; see
-[`docs/02-silver.md`](docs/02-silver.md)). 7 more event types and the multiline
-file remain before `v0.2` tags; Gold modeling not yet started.
+✅ `v0.2` Silver complete on `feat/v0.2-silver` — all 10 event types across both
+raw sources (dedupe, envelope + payload drift-fix, DLQ split, array explode,
+dynamic-map reconstruction, cross-page dimension resolution, fx normalization,
+reconciliation; see [`docs/02-silver.md`](docs/02-silver.md)). 81 dbt models,
+verified locally and via a real DAB job run. Not yet merged to `main` or
+tagged — pending final review. Gold modeling not yet started.

@@ -20,3 +20,8 @@ models:
           - accepted_values:
               arguments:
                 values: ["1.0", "2.0"]
+
+  - name: stg_raw_events_multiline
+    description: >
+      Pass-through view over `novalake.bronze.raw_events_multiline` -- one
+      row per page (9 expected). No flattening or drift-fixing here.

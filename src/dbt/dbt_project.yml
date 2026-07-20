@@ -18,3 +18,8 @@ models:
       # treated as the same thing here, on purpose — not a naming oversight.
       +schema: silver
       +materialized: view
+    intermediate:
+      # Real Silver transform work (dedupe, drift-fix, explode, DLQ split) —
+      # still Silver's UC schema, just not the thin 1:1 "staging" convention.
+      +schema: silver
+      +materialized: view

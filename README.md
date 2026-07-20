@@ -98,5 +98,9 @@ decisions and why `pipelines/` moved from `v0.6` to a later comparative phase.
 
 ## Status
 
-🚧 `v0.0`–`v0.1` scaffolding in place (DAB + dbt wiring); Silver/Gold modeling not
-yet started.
+✅ `v0.2` Silver complete on `feat/v0.2-silver` — all 10 event types across both
+raw sources (dedupe, envelope + payload drift-fix, DLQ split, array explode,
+dynamic-map reconstruction, cross-page dimension resolution, fx normalization,
+reconciliation; see [`docs/02-silver.md`](docs/02-silver.md)). 81 dbt models,
+verified locally and via a real DAB job run. Not yet merged to `main` or
+tagged — pending final review. Gold modeling not yet started.

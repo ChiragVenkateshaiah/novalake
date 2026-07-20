@@ -11,9 +11,22 @@ resources:
               - "--catalog"
               - "${var.catalog}"
 
+        - task_key: bronze_ingest_multiline
+          environment_key: pyspark_env
+          spark_python_task:
+            python_file: ../src/ingest_multiline.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+          # No depends_on bronze_ingest -- independent Bronze sources, safe
+          # to run in parallel. Peak job concurrency: 2 tasks, well under
+          # Free Edition's 5-concurrent-task-per-account ceiling (checked
+          # live via `databricks jobs list-runs` before adding this).
+
         - task_key: dbt_silver_gold
           depends_on:
             - task_key: bronze_ingest
+            - task_key: bronze_ingest_multiline
           environment_key: dbt_env
           dbt_task:
             project_directory: ../src/dbt

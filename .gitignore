@@ -16,8 +16,10 @@ Thumbs.db
 *.bundle/
 .databricks-login.json
 
-# Claude Code local tooling (not project deliverables)
-.claude/
+# Claude Code local tooling (not project deliverables) — commands/ is tracked,
+# it's a project deliverable (repo-shared slash commands), not local config
+.claude/*
+!.claude/commands/
 .ai-dev-kit/
 .mcp.json
 

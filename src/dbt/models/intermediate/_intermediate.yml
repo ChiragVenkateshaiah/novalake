@@ -459,3 +459,67 @@ models:
       - name: page
         tests:
           - not_null
+
+  # --- Increment 5: multiline dedup/envelope resolution + transaction payload ---
+
+  - name: int_multiline_events_deduped
+    description: >
+      All event types in the multiline file, deduped by event_id (arbitrary
+      deterministic tie-break -- replays are byte-identical). Envelope-level
+      drift resolved (timestamp, source). Generic customer_id_resolved, same
+      promotion as the NDJSON file's int_events_deduped.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - not_null
+      - name: event_timestamp_quality
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ok", "null", "epoch_zero", "far_future"]
+
+  - name: int_multiline_transactions
+    description: >
+      transaction.{completed,failed,created} in the multiline file. Payload
+      nests one level deeper (payload.transaction.*) than the NDJSON file.
+      risk schema now also includes signal_matrix (array-of-arrays).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["transaction.completed", "transaction.failed", "transaction.created"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: amount_minor_resolved
+        tests:
+          - not_null
+      - name: risk_score
+        tests:
+          - not_null
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: int_multiline_transactions_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_transactions_dlq
+    description: int_multiline_transactions filtered to event_timestamp_quality != 'ok'.

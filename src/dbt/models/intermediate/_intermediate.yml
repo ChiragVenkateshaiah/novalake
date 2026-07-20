@@ -350,3 +350,77 @@ models:
               arguments:
                 to: ref('int_risk_alerts_clean')
                 field: event_id
+
+  # --- Increment 3: support.ticket ---
+
+  - name: int_support_tickets
+    description: >
+      support.ticket only. No payload drift beyond customer_id_resolved.
+      description is free text, kept as-is for the eventual GenAI layer.
+      tags[] and messages[] both stay arrays here, exploded downstream as
+      two independent siblings. related_transaction_id and
+      resolution_minutes are genuinely nullable by generator design --
+      not tested not_null on purpose.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["support.ticket"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: ticket_id
+        tests:
+          - not_null
+      - name: subject
+        tests:
+          - not_null
+      - name: description
+        tests:
+          - not_null
+
+  - name: int_support_tickets_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_support_tickets_dlq
+    description: int_support_tickets filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_support_ticket_tags
+    description: >
+      int_support_tickets_clean.tags exploded (LATERAL VIEW OUTER explode --
+      tags[] can legitimately be empty, so OUTER preserves zero-tag tickets).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_support_tickets_clean')
+                field: event_id
+
+  - name: int_support_ticket_messages
+    description: >
+      int_support_tickets_clean.messages exploded (plain posexplode --
+      messages[] is guaranteed non-empty by construction).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_support_tickets_clean')
+                field: event_id
+      - name: sender
+        tests:
+          - not_null
+      - name: body_text
+        tests:
+          - not_null

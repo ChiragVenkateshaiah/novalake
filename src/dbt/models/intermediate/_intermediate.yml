@@ -424,3 +424,38 @@ models:
       - name: body_text
         tests:
           - not_null
+
+  # --- Increment 4: multiline first-level explode ---
+  # No dedup/drift-resolution tests here yet -- event_id is NOT unique in
+  # int_multiline_events (same as stg_raw_events pre-dedup, ~1.5% replays
+  # within pages), dedup is a later increment's job.
+
+  - name: int_multiline_events
+    description: >
+      data.events exploded from stg_raw_events_multiline (posexplode) --
+      one row per event, ~4,000+ expected. Sibling to
+      int_multiline_partial_failures, not nested inside it.
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+      - name: event_type
+        tests:
+          - not_null
+      - name: page
+        tests:
+          - not_null
+
+  - name: int_multiline_partial_failures
+    description: >
+      data.partial_failures exploded from stg_raw_events_multiline
+      (posexplode) -- the multiline file's dead-letter records. `raw` is a
+      stringified JSON blob, kept as-is (from_json parsing is later work).
+    columns:
+      - name: failure_id
+        tests:
+          - unique
+          - not_null
+      - name: page
+        tests:
+          - not_null

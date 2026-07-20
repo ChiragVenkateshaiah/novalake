@@ -894,3 +894,72 @@ models:
       - name: event_id
         tests:
           - not_null
+
+  # --- Increment 7: cross-page dimensions, fx, DLQ parsing, reconciliation ---
+
+  - name: int_multiline_merchants
+    description: >
+      Cross-page union of reference_data.merchants, latest-wins per
+      merchant_id by as_of_page (a real ordering signal, unlike customers).
+    columns:
+      - name: merchant_id
+        tests:
+          - unique
+          - not_null
+
+  - name: int_multiline_customers
+    description: >
+      Cross-page union of reference_data.customers, deduped by customer_id
+      with an arbitrary tie-break -- no real cross-page ordering signal
+      exists for this dimension (see model comment).
+    columns:
+      - name: customer_id
+        tests:
+          - unique
+          - not_null
+
+  - name: int_multiline_fx_rates
+    description: Cross-page union of reference_data.fx_rates, no resolution needed.
+    columns:
+      - name: quote
+        tests:
+          - not_null
+      - name: rate
+        tests:
+          - not_null
+
+  - name: int_multiline_transactions_fx_applied
+    description: >
+      int_multiline_transactions_clean with amount_minor_resolved
+      normalized to a common USD base via int_multiline_fx_rates
+      (LEFT JOIN + coalesce(rate, 1.0) for USD, which has no rate row by
+      generator design).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: amount_minor_usd
+        tests:
+          - not_null
+
+  - name: int_multiline_partial_failures_parsed
+    description: >
+      int_multiline_partial_failures with `raw` parsed via from_json against
+      the broken event's own fixed, minimal shape.
+    columns:
+      - name: failure_id
+        tests:
+          - unique
+          - not_null
+
+  - name: int_multiline_record_count_reconciliation
+    description: >
+      export_metadata.record_counts.events/.partial_failures compared
+      against actual (pre-dedup) counts per page -- surfaces the
+      generator's intentional mismatch, does not fix it.
+    columns:
+      - name: page
+        tests:
+          - unique
+          - not_null

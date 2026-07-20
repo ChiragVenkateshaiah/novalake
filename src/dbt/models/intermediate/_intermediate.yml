@@ -91,3 +91,116 @@ models:
               arguments:
                 to: ref('int_transactions_clean')
                 field: event_id
+
+  # --- Increment 1: auth.session, review.submitted, refund.issued ---
+
+  - name: int_auth_sessions
+    description: >
+      auth.session only. customer_id_resolved from the generic layer;
+      device struct-vs-flat-fields reshaping resolved here (specific to this
+      type).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["auth.session"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: device_os_resolved
+        description: >
+          coalesce(device.os, device_os) -- always populated by generator
+          construction regardless of schema_version.
+        tests:
+          - not_null
+      - name: device_id_resolved
+        tests:
+          - not_null
+
+  - name: int_auth_sessions_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_auth_sessions_dlq
+    description: int_auth_sessions filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_reviews
+    description: >
+      review.submitted only. No payload drift beyond customer_id_resolved --
+      every other field is stable across v1/v2.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["review.submitted"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: merchant_id
+        tests:
+          - not_null
+      - name: rating
+        tests:
+          - not_null
+
+  - name: int_reviews_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_reviews_dlq
+    description: int_reviews filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_refunds
+    description: >
+      refund.issued only. currency_clean via the shared clean_currency macro.
+      amount and notes are genuinely nullable by generator design (maybe(...))
+      -- not tested not_null on purpose.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["refund.issued"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: original_transaction_id
+        tests:
+          - not_null
+      - name: reason
+        tests:
+          - not_null
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn   # "US$" is a known, intentional invalid value
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: int_refunds_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_refunds_dlq
+    description: int_refunds filtered to event_timestamp_quality != 'ok'.

@@ -523,3 +523,374 @@ models:
 
   - name: int_multiline_transactions_dlq
     description: int_multiline_transactions filtered to event_timestamp_quality != 'ok'.
+
+  # --- Increment 6: multiline arrays, dynamic-map fields, remaining event types ---
+
+  - name: int_multiline_line_items
+    description: >
+      int_multiline_transactions_clean.line_items exploded (OUTER -- can be
+      missing or empty). attributes reconstructed as MAP (open-vocabulary).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_transactions_clean')
+                field: event_id
+
+  - name: int_multiline_line_item_discounts
+    description: int_multiline_line_items.discounts exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+
+  - name: int_multiline_fees
+    description: int_multiline_transactions_clean.fees exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_transactions_clean')
+                field: event_id
+
+  - name: int_multiline_network_tokens
+    description: >
+      int_multiline_transactions_clean.payment_method.network_tokens
+      exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_transactions_clean')
+                field: event_id
+
+  - name: int_multiline_auth_sessions
+    description: >
+      auth.session in the multiline file. geo.coordinates left as a
+      2-element array (positional lat/lon pair, not exploded).
+      device.sensors reconstructed as MAP (v2-only, open-vocabulary).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["auth.session"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+
+  - name: int_multiline_auth_sessions_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_auth_sessions_dlq
+    description: int_multiline_auth_sessions filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_kyc_verifications
+    description: kyc.verification in the multiline file.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["kyc.verification"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+
+  - name: int_multiline_kyc_verifications_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_kyc_verifications_dlq
+    description: int_multiline_kyc_verifications filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_kyc_documents
+    description: >
+      int_multiline_kyc_verifications_clean.documents exploded (plain --
+      guaranteed non-empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_kyc_verifications_clean')
+                field: event_id
+
+  - name: int_multiline_kyc_document_pages
+    description: int_multiline_kyc_documents.pages exploded (plain -- guaranteed non-empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+
+  - name: int_multiline_payouts
+    description: >
+      payout.scheduled in the multiline file. No customer_id_resolved
+      column and no bank_account_last4 -- both differ from the NDJSON
+      generator's build_payout, confirmed against the multiline generator.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["payout.scheduled"]
+      - name: merchant_id
+        tests:
+          - not_null
+
+  - name: int_multiline_payouts_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_payouts_dlq
+    description: int_multiline_payouts filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_payout_line_breakdown
+    description: int_multiline_payouts_clean.line_breakdown exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_payouts_clean')
+                field: event_id
+
+  - name: int_multiline_payout_sub_items
+    description: >
+      int_multiline_payout_line_breakdown.sub_items exploded (plain --
+      guaranteed non-empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+
+  - name: int_multiline_risk_alerts
+    description: risk.alert in the multiline file.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["risk.alert"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+
+  - name: int_multiline_risk_alerts_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_risk_alerts_dlq
+    description: int_multiline_risk_alerts filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_risk_alert_signals
+    description: >
+      int_multiline_risk_alerts_clean.signals exploded (plain --
+      guaranteed non-empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_risk_alerts_clean')
+                field: event_id
+
+  - name: int_multiline_risk_alert_sub_signals
+    description: >
+      int_multiline_risk_alert_signals.sub_signals exploded (OUTER -- can
+      be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+
+  - name: int_multiline_refunds
+    description: >
+      refund.issued in the multiline file, top-level payload siblings same
+      as the NDJSON file. amount is genuinely nullable by generator design.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["refund.issued"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: original_transaction_id
+        tests:
+          - not_null
+
+  - name: int_multiline_refunds_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_refunds_dlq
+    description: int_multiline_refunds filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_reviews
+    description: >
+      review.submitted in the multiline file, nested under payload.review.*
+      (unlike the NDJSON file's flat payload.*).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["review.submitted"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: merchant_id
+        tests:
+          - not_null
+      - name: rating
+        tests:
+          - not_null
+
+  - name: int_multiline_reviews_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_reviews_dlq
+    description: int_multiline_reviews filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_review_media
+    description: int_multiline_reviews_clean.media exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_reviews_clean')
+                field: event_id
+
+  - name: int_multiline_review_replies
+    description: int_multiline_reviews_clean.replies exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_reviews_clean')
+                field: event_id
+
+  - name: int_multiline_support_tickets
+    description: >
+      support.ticket in the multiline file, nested under payload.ticket.*
+      (unlike the NDJSON file's flat payload.*). metadata reconstructed as
+      MAP (open-vocabulary, shares the union column with
+      transaction.metadata).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["support.ticket"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: ticket_id
+        tests:
+          - not_null
+
+  - name: int_multiline_support_tickets_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_multiline_support_tickets_dlq
+    description: int_multiline_support_tickets filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_multiline_support_ticket_tags
+    description: int_multiline_support_tickets_clean.tags exploded (OUTER -- can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_support_tickets_clean')
+                field: event_id
+
+  - name: int_multiline_support_ticket_messages
+    description: >
+      int_multiline_support_tickets_clean.messages exploded (plain --
+      guaranteed non-empty). reactions treated as direct struct access
+      (closed-enum, only ever the "agent" key), not MAP reconstruction.
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_multiline_support_tickets_clean')
+                field: event_id
+      - name: sender
+        tests:
+          - not_null
+      - name: body_text
+        tests:
+          - not_null
+
+  - name: int_multiline_support_ticket_attachments
+    description: >
+      int_multiline_support_ticket_messages.attachments exploded (OUTER --
+      can be empty).
+    columns:
+      - name: event_id
+        tests:
+          - not_null

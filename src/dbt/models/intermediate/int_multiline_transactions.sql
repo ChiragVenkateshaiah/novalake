@@ -60,8 +60,19 @@ select
     payload.transaction.fees as fees,
     payload.status as status,
     payload.idempotency_key as idempotency_key,
-    payload.balances as balances,
-    payload.metadata as metadata,
+
+    -- Dynamic-key-map fields, reconstructed as actual MAP<STRING,STRING>
+    -- (to_json + from_json round-trip) rather than left as Bronze's inferred
+    -- bounded struct. Both are the principled cases per docs/02-silver.md:
+    -- `metadata` has open-vocabulary, descriptive keys (dyn_metadata() --
+    -- the genuine schema-explosion case the dataset guide is teaching, only
+    -- bounded here because this generator's META_KEYS pool happens to be
+    -- finite); `balances` is lookup-keyed (currency codes used downstream).
+    -- Spark's from_json coerces the struct's mixed-type values (int, float,
+    -- string, bool) to their string form when the target value type is
+    -- STRING -- verified at dbt run time, not assumed.
+    from_json(to_json(payload.metadata), 'map<string,string>') as metadata_map,
+    from_json(to_json(payload.balances), 'map<string,string>') as balances_map,
 
     _source_file,
     _ingested_at

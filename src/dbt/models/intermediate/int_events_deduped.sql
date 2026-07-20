@@ -1,7 +1,9 @@
--- Generic across ALL event types (reused by future v0.2 slices for the other
--- 7 event families). Dedup + envelope-level drift resolution only — payload
--- is passed through untouched; payload-specific fixes are transaction.*'s
--- own job (see int_transactions.sql).
+-- Generic across ALL event types, reused by every v0.2 event-family slice.
+-- Dedup + envelope-level drift resolution, plus customer_id_resolved (shared
+-- by 9 of the 10 event types -- payout.scheduled is the one exception, it has
+-- no customer key at all, so this resolves to NULL for that type by design).
+-- payload itself is passed through untouched; payload-specific fixes are each
+-- event family's own job (see int_transactions.sql and friends).
 
 with deduped as (
     select
@@ -38,6 +40,11 @@ resolved as (
         case when schema_version = '2.0' then source.system else source_system end as resolved_source_system,
         case when schema_version = '2.0' then source.region else null end as resolved_source_region,
         case when schema_version = '2.0' then source.host else null end as resolved_source_host,
+        -- Key renaming (v1 cust_id vs v2 customer_id) -- both fields exist as
+        -- nullable siblings in Bronze's inferred payload struct for every
+        -- event type; exactly one is populated per row, except payout.scheduled
+        -- (merchant-centric, no customer key at all -- resolves to NULL there).
+        coalesce(payload.customer_id, payload.cust_id) as customer_id_resolved,
         payload,
         _source_file,
         _ingested_at
@@ -70,6 +77,7 @@ select
     resolved_source_system,
     resolved_source_region,
     resolved_source_host,
+    customer_id_resolved,
     payload,
     _source_file,
     _ingested_at

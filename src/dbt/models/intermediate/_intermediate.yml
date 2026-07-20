@@ -1,0 +1,93 @@
+version: 2
+
+models:
+  - name: int_events_deduped
+    description: >
+      All event types, deduped by event_id (max ingested_at wins). Envelope-
+      level drift resolved (timestamp, source). Payload untouched -- this is
+      the generic base future v0.2 slices (the other 7 event types) reuse.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - not_null
+      - name: event_timestamp_quality
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ok", "null", "epoch_zero", "far_future"]
+
+  - name: int_transactions
+    description: >
+      transaction.{completed,failed,created} only. Payload drift resolved;
+      line_items still an array (exploded downstream, post-DLQ-split).
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["transaction.completed", "transaction.failed", "transaction.created"]
+      - name: customer_id_resolved
+        description: >
+          coalesce(customer_id, cust_id) -- always populated by generator
+          construction, exactly one of the two source fields is set per row.
+        tests:
+          - not_null
+      - name: amount_minor_resolved
+        tests:
+          - not_null
+      - name: risk_score
+        description: >
+          Always recoverable -- from_json for the well-formed 97%, regex
+          fallback for the malformed 3% (see int_transactions.sql).
+        tests:
+          - not_null
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn   # "US$" is a known, intentional invalid value
+                                  # -- surface it, don't fail the job on it
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: int_transactions_clean
+    description: >
+      int_transactions filtered to event_timestamp_quality = 'ok'.
+    columns:
+      - name: resolved_event_timestamp
+        description: >
+          not_null here catches a real bug class: a row classified 'ok' by
+          int_events_deduped's quality-flag logic that somehow carries a null
+          resolved timestamp. (An accepted_values test on
+          event_timestamp_quality itself would be tautological -- it would
+          just re-test this model's own WHERE clause against itself.)
+        tests:
+          - not_null
+
+  - name: int_transactions_dlq
+    description: >
+      int_transactions filtered to event_timestamp_quality != 'ok' -- the
+      quarantine table. Complementary to int_transactions_clean; kept at
+      transaction grain (unexploded) for easy review.
+
+  - name: int_transaction_line_items
+    description: >
+      int_transactions_clean.line_items exploded (LATERAL VIEW OUTER
+      posexplode). DLQ rows are never exploded.
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_transactions_clean')
+                field: event_id

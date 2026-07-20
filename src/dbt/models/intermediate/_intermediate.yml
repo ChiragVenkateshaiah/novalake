@@ -204,3 +204,149 @@ models:
 
   - name: int_refunds_dlq
     description: int_refunds filtered to event_timestamp_quality != 'ok'.
+
+  # --- Increment 2: kyc.verification, payout.scheduled, risk.alert ---
+
+  - name: int_kyc_verifications
+    description: >
+      kyc.verification only. No payload drift beyond customer_id_resolved.
+      documents[] stays an array here, exploded downstream.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["kyc.verification"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: full_name
+        tests:
+          - not_null
+      - name: risk_score
+        tests:
+          - not_null
+
+  - name: int_kyc_verifications_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_kyc_verifications_dlq
+    description: int_kyc_verifications filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_kyc_documents
+    description: >
+      int_kyc_verifications_clean.documents exploded (plain posexplode --
+      documents[] is guaranteed non-empty by construction).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_kyc_verifications_clean')
+                field: event_id
+
+  - name: int_payouts
+    description: >
+      payout.scheduled only. No customer_id_resolved column -- this type is
+      merchant-centric, has no customer key at all. currency_clean via the
+      shared clean_currency macro. fees[] stays an array here, exploded
+      downstream.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["payout.scheduled"]
+      - name: merchant_id
+        tests:
+          - not_null
+      - name: gross_amount
+        tests:
+          - not_null
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn   # "US$" is a known, intentional invalid value
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: int_payouts_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_payouts_dlq
+    description: int_payouts filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_payout_fees
+    description: >
+      int_payouts_clean.fees exploded (LATERAL VIEW OUTER posexplode -- fees
+      can legitimately be empty, so OUTER preserves zero-fee payouts).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_payouts_clean')
+                field: event_id
+
+  - name: int_risk_alerts
+    description: >
+      risk.alert only. No payload drift beyond customer_id_resolved.
+      signals[] stays an array here, exploded downstream.
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: event_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["risk.alert"]
+      - name: customer_id_resolved
+        tests:
+          - not_null
+      - name: alert_type
+        tests:
+          - not_null
+      - name: severity
+        tests:
+          - not_null
+
+  - name: int_risk_alerts_clean
+    columns:
+      - name: resolved_event_timestamp
+        tests:
+          - not_null
+
+  - name: int_risk_alerts_dlq
+    description: int_risk_alerts filtered to event_timestamp_quality != 'ok'.
+
+  - name: int_risk_alert_signals
+    description: >
+      int_risk_alerts_clean.signals exploded (plain posexplode -- signals[]
+      is guaranteed non-empty by construction).
+    columns:
+      - name: event_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('int_risk_alerts_clean')
+                field: event_id

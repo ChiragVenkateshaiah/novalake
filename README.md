@@ -104,5 +104,10 @@ array explode, dynamic-map reconstruction, cross-page dimension resolution, fx
 normalization, reconciliation; see [`docs/02-silver.md`](docs/02-silver.md)).
 81 dbt models, verified locally and via a real DAB job run.
 
-🚧 `v0.3` Gold in progress on `feat/v0.3-gold` — conformed dimensions, fact
-tables, and business metrics on top of Silver.
+✅ `v0.3` Gold complete and merged to `main`, tagged `v0.3` — 20 Gold models
+(conformed `dim_date`/`dim_customers`/`dim_merchants`, 8 fact tables, 9 metric
+rollups) on top of Silver, every fact's row count verified against its source
+`_clean` models; see [`docs/03-gold.md`](docs/03-gold.md).
+
+🚧 `v0.4` Serving not yet started — Genie space on Gold, dashboard/feature
+tables.

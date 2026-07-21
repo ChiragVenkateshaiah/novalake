@@ -205,6 +205,16 @@ nullability — both caught before code was written, not after a failing test).
       avg-rating exact match, approval+decline rates summing to 1.0 across
       every row, transaction/refund/fraud-signal totals reconciling exactly
       to their source fact tables
+- [x] Real DAB job run: `TERMINATED SUCCESS` (`bronze_ingest` 7,105 rows,
+      `bronze_ingest_multiline` 9 rows in parallel, `dbt_silver_gold` — now
+      including all 20 Gold models). Job-written Gold table counts match
+      local runs exactly (spot-checked: `dim_customers`=6,296,
+      `dim_merchants`=100, `fct_transactions`=4,730, `fct_refunds`=619,
+      `fct_payouts`=529, `fct_support_tickets`=1,255, `fct_reviews`=1,034,
+      `fct_risk_alerts`=515, `fct_auth_sessions`=1,296,
+      `fct_kyc_verifications`=511) — confirms `dbt_silver_gold` picks up
+      `models/gold/**` automatically with no job-definition change, as
+      predicted in Step 1 of the design plan
 - [x] Sign-off: **given** — module Definition of Done met per
       `CONTRIBUTING.md`
 

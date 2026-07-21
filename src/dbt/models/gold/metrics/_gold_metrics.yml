@@ -1,0 +1,140 @@
+version: 2
+
+models:
+  - name: metric_transaction_volume
+    description: >
+      Grain (event_date, source, currency_clean). Native-currency, never
+      blended across currencies -- no fx data exists for ndjson.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+      - name: transaction_count
+        tests:
+          - not_null
+
+  - name: metric_transaction_volume_usd_multiline
+    description: Grain (event_date). Multiline only -- see model comment.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: gross_amount_usd
+        tests:
+          - not_null
+
+  - name: metric_approval_decline_rate
+    description: >
+      Grain (event_date, source), status in (completed, failed) only --
+      every grain row has at least 1 row by construction, so approval_rate/
+      decline_rate can never be a 0/0 division.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+      - name: approval_rate
+        tests:
+          - not_null
+      - name: decline_rate
+        tests:
+          - not_null
+
+  - name: metric_refund_rate
+    description: >
+      Grain (event_date, source). An aggregate ratio, not a join. refund_rate
+      can be genuinely NULL (a date/source with refunds but zero completed
+      transactions) -- not tested not_null on purpose.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+      - name: refund_count
+        tests:
+          - not_null
+      - name: completed_transaction_count
+        tests:
+          - not_null
+
+  - name: metric_fraud_signals
+    description: >
+      Grain (event_date, source). Two independent, not-blended measures --
+      full outer join means either side's counts/rates can be genuinely
+      NULL (a date/source with alerts but no transactions, or vice versa) --
+      not tested not_null on purpose.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+
+  - name: metric_support_resolution_time
+    description: >
+      Grain (event_date, priority). NDJSON only. avg_resolution_minutes can
+      be genuinely NULL (no resolved tickets that day/priority) -- not
+      tested not_null on purpose.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: priority
+        tests:
+          - not_null
+
+  - name: metric_support_sla_breach_rate_multiline
+    description: >
+      Grain (event_date, priority). Multiline only. ticket_count always >= 1
+      for an existing grain row, so sla_breach_rate can never be a 0/0
+      division.
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: priority
+        tests:
+          - not_null
+      - name: ticket_count
+        tests:
+          - not_null
+      - name: sla_breach_rate
+        tests:
+          - not_null
+
+  - name: metric_review_ratings_by_merchant
+    description: >
+      Grain merchant_id. rating_count always >= 1 for an existing grain row,
+      so avg_rating/verified_purchase_rate can never be a 0/0 division.
+    columns:
+      - name: merchant_id
+        tests:
+          - unique
+          - not_null
+      - name: rating_count
+        tests:
+          - not_null
+      - name: avg_rating
+        tests:
+          - not_null
+
+  - name: metric_payout_latency
+    description: Grain (event_date, source, schedule_status).
+    columns:
+      - name: event_date
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+      - name: payout_count
+        tests:
+          - not_null

@@ -23,3 +23,16 @@ models:
       # still Silver's UC schema, just not the thin 1:1 "staging" convention.
       +schema: silver
       +materialized: view
+    gold:
+      # Conformed dims/facts on top of Silver. +schema: gold maps 1:1 to
+      # Unity Catalog's novalake.gold via the same generate_schema_name
+      # override as staging/intermediate (ADR-0005).
+      +schema: gold
+      +materialized: view
+      metrics:
+        # Pre-aggregated business-metric rollups — a different kind of model
+        # than atomic dims/facts, worth its own declared block even though it
+        # resolves to the same schema (same reasoning as staging/intermediate
+        # being declared separately).
+        +schema: gold
+        +materialized: view

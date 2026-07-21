@@ -1,0 +1,401 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: >
+      Calendar spine, 2026-01-01..2026-06-15 (166 rows), hard-bounded to both
+      generators' shared date range. No source dependency.
+    columns:
+      - name: date_day
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_customers
+    description: >
+      Conformed customer dimension across both sources, built from every
+      _clean model carrying a real customer_id (payout.scheduled excluded --
+      merchant-centric, no customer key). Deliberately sparse:
+      has_multiline_profile is false for the majority of rows (multiline's
+      reference data only samples a fraction of the full customer pool).
+    columns:
+      - name: customer_id
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_merchants
+    description: >
+      Conformed merchant dimension across both sources, built from every
+      _clean model carrying a real merchant_id FK. int_multiline_merchants is
+      the sole attribute source of truth -- NDJSON's inline transaction
+      merchant struct is payload noise, only its merchant_id is used.
+    columns:
+      - name: merchant_id
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_transactions
+    description: >
+      UNION ALL of both sources' transaction.{completed,failed,created} clean
+      models. Native currency for both sources; amount_minor_usd/
+      fx_rate_quote_per_usd are multiline-only (NULL for ndjson -- fx data
+      doesn't exist for that source, never fabricated).
+    columns:
+      - name: transaction_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["completed", "failed", "created"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: merchant_id
+        description: >
+          ~2% nullable on the ndjson side (merchant struct is itself
+          maybe(..., 0.02, None) by generator design) -- not tested not_null.
+        tests:
+          - relationships:
+              arguments:
+                to: ref('dim_merchants')
+                field: merchant_id
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn   # "US$" is a known, intentional invalid value
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: fct_refunds
+    description: >
+      UNION ALL of both sources' refund.issued clean models.
+      original_transaction_id is a random UUID, never a real FK -- not
+      FK-tested.
+    columns:
+      - name: refund_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: reason
+        description: >
+          5-value union across both sources -- multiline never emits
+          item_not_received, confirmed against generate_multiline.py, not a
+          data defect.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["customer_request", "duplicate_charge", "item_not_received", "fraudulent", "merchant_error"]
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: fct_payouts
+    description: >
+      UNION ALL of both sources' payout.scheduled clean models.
+      Merchant-centric only -- no customer_id column (this event type has no
+      customer key in either generator).
+    columns:
+      - name: payout_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: merchant_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_merchants')
+                field: merchant_id
+      - name: schedule_status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["scheduled", "in_transit", "paid", "held"]
+      - name: currency_clean
+        tests:
+          - accepted_values:
+              config:
+                severity: warn
+              arguments:
+                values: ["USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD"]
+
+  - name: fct_support_tickets
+    description: >
+      UNION ALL of both sources' support.ticket clean models.
+      resolution_minutes (ndjson-only) and sla_target_minutes/sla_breached
+      (multiline-only) are deliberately separate, non-equivalent column
+      pairs -- see model comment. related_transaction_id is a random UUID,
+      never a real FK -- not FK-tested.
+    columns:
+      - name: ticket_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: channel
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["email", "chat", "phone", "in_app"]
+      - name: priority
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["low", "medium", "high", "urgent"]
+
+  - name: fct_reviews
+    description: >
+      UNION ALL of both sources' review.submitted clean models. title/body
+      free text excluded (no current consumer). helpful_votes is ndjson-only.
+    columns:
+      - name: review_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: merchant_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_merchants')
+                field: merchant_id
+      - name: rating
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+
+  - name: fct_risk_alerts
+    description: >
+      UNION ALL of both sources' risk.alert clean models. Identical shape on
+      both sides at this grain.
+    columns:
+      - name: risk_alert_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: alert_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["velocity", "geo_mismatch", "device_change", "amount_anomaly", "blacklist_match"]
+      - name: severity
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["info", "low", "medium", "high", "critical"]
+
+  - name: fct_auth_sessions
+    description: >
+      UNION ALL of both sources' auth.session clean models. Multiline-only
+      fields (geo_coordinates, device_sensors_map) stay in the Silver model,
+      not duplicated here.
+    columns:
+      - name: auth_session_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: result
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["success", "failed", "challenged"]
+
+  - name: fct_kyc_verifications
+    description: >
+      UNION ALL of both sources' kyc.verification clean models. Identical
+      shape on both sides at this grain.
+    columns:
+      - name: kyc_verification_key
+        tests:
+          - unique
+          - not_null
+      - name: event_id
+        tests:
+          - not_null
+      - name: source
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["ndjson", "multiline"]
+      - name: event_date
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["approved", "rejected", "pending", "manual_review"]

@@ -108,9 +108,13 @@
     customer-360 question demonstrating guardrail #4 on the dimension that's
     actually sparse)
   - *Validation check:* every SQL pair runs and its result matches the
-    underlying metric/fact model's documented grain — pending: not yet run
-    against a live warehouse (no workspace access this phase; see §5)
-- **Step 6.2 — Genie space design** ✅ drafted
+    underlying metric/fact model's documented grain — ✅ partially confirmed:
+    the 6 certified pairs used in Step 6.2 ran live via the deployed Genie
+    space (approval/decline, refund rate, SLA breach rate, fraud signals,
+    review ratings by category, auth success rate) and returned correct,
+    guardrail-respecting results; the remaining catalog entries (KYC,
+    payouts, transactions, customer/merchant 360) not yet run live
+- **Step 6.2 — Genie space design** ✅ drafted, deployed, and validated
   - *Objective:* curated table scope + guardrail instructions + sample
     questions pulled from the catalog
   - *Task:* draft space config over Gold with `fct_refunds
@@ -128,8 +132,18 @@
     questions, and a 16-question sample list for the Genie UI
   - *Validation check:* sample questions return correctly-separated,
     correctly-computed answers where a naive answer would violate a
-    guardrail — pending, requires the space to actually exist (deployment
-    checklist is in the spec file, to be run by hand)
+    guardrail — ✅ done. Deployed by hand as "NovaLake Gold Analytics" (named
+    "Genie Agent" in this workspace's UI). Column exclusion, instructions,
+    and all 6 certified pairs configured per the spec. 3 guardrail tests run
+    live: (1) "approval rate last quarter" correctly resolved "last quarter"
+    to Q2 2026 relative to the actual current date and used the certified
+    count-based recomputation; (2) "support ticket performance" correctly
+    kept `ndjson` resolution time and `multiline` SLA breach rate as two
+    separate answers, and its 47% overall breach figure was the
+    count-weighted recomputation, not the naive per-priority average
+    (47.7%) — confirms guardrail #5 held, not just #2; (3) "total
+    transaction volume in USD this year" correctly labeled the figure as
+    multiline-only rather than blending in `ndjson`
 - **Step 6.3 — Dashboard design** ✅ drafted
   - *Objective:* one tile set per business domain, each backed by catalog SQL
   - *Task:* the dataset SQL (from the catalog) is the reviewed unit; declare
@@ -162,8 +176,9 @@
 - Ownership & access: ___
 
 ## 9. Validation & Acceptance Criteria
-- [ ] Genie space created in workspace, answers respect Gold's non-equivalence
-      guardrails
+- [x] Genie space created in workspace, answers respect Gold's non-equivalence
+      guardrails — "NovaLake Gold Analytics", deployed by hand 2026-07-21,
+      3 guardrail tests passed live (see Step 6.2 above)
 - [ ] Dashboard created in workspace, every tile backed by a documented Gold
       model
 - [ ] Sign-off: ___
@@ -189,3 +204,4 @@
 | 2026-07-21 | Module scaffolded from `docs/_skeleton.md`; architecture context, prerequisites, and step outline filled in | Chirag + Claude |
 | 2026-07-21 | Plan reviewed by Opus before implementation (four corrections made: missing rate-averaging guardrail, all-20-tables Genie scope invites the non-FK join Gold avoided, `.lvdash.json` isn't hand-reviewable the way `dbt_job.yml` is, no shared question→SQL catalog feeding both consumers) — all four folded in above | Chirag + Claude |
 | 2026-07-21 | Steps 6.1–6.3 drafted: `docs/serving/question_catalog.md` (Opus-reviewed, 5 corrections), `docs/serving/genie_space.md`, `docs/serving/dashboard.md`. Nothing deployed to the workspace this session, per `docs/checkpoint.md` — §9 acceptance criteria remain pending until you run the deployment/validation steps each spec file calls out | Chirag + Claude |
+| 2026-07-21 | Genie space ("NovaLake Gold Analytics") deployed by hand, per `docs/checkpoint.md` (Chirag created it in the workspace UI; Claude guided step by step and reviewed the result, no MCP write calls made). Table scope, column exclusion (`original_transaction_id`, `related_transaction_id`), 7-point instructions, and 6 certified query pairs configured per `docs/serving/genie_space.md`. 3 live guardrail tests passed: source-scoped rate recomputation (guardrail #5), never blending support-ticket metrics across sources (guardrail #2), never blending fx-normalized USD into a native-currency total (guardrail #1). §9's Genie criterion checked off | Chirag + Claude |

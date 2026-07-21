@@ -117,18 +117,29 @@ Broader set, covering domains without a certified pair too — drawn from
 15. Give me a merchant overview — reviews, transaction volume.
 16. Give me a customer overview — transactions, support tickets, whether we have an enriched profile for them.
 
-## Deployment checklist (for you to run, not this session)
+## Deployment checklist (run by hand, not by Claude)
 
-- [ ] Create the space via UI/CLI/`manage_genie` with the table scope above
-- [ ] **Manually exclude `original_transaction_id` and
-      `related_transaction_id`** from the space's column visibility
-- [ ] Paste the General Instructions block above
-- [ ] Add the certified example question/SQL pairs
-- [ ] Add the sample questions list
-- [ ] Test each certified pair returns the expected guardrail-respecting
-      answer before considering this step done (`docs/04-serving.md` §9)
+- [x] Create the space via UI with the table scope above — named
+      "NovaLake Gold Analytics" (workspace UI labels this "Genie Agent")
+- [x] **Manually exclude `original_transaction_id` and
+      `related_transaction_id`** from the space's column visibility — done
+      via each table's per-column edit screen under the Sources tab
+- [x] Paste the General Instructions block above — added under the
+      Instructions tab
+- [x] Add the certified example question/SQL pairs — all 6 added under the
+      Examples tab
+- [x] Add the sample questions list — added under the About tab's "Common
+      questions" (core 8 plus 4 more)
+- [x] Test each certified pair returns the expected guardrail-respecting
+      answer before considering this step done (`docs/04-serving.md` §9) —
+      3 live tests run in the Chat tab, all passed: approval-rate
+      certified-query reuse with correct quarter resolution, support
+      ticket performance kept as two separate source-scoped answers (not
+      blended), and the SLA breach rate confirmed count-weighted (47%) not
+      naively averaged (47.7%); USD total correctly labeled multiline-only
 
 ## Changelog
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-07-21 | Initial Genie space spec drafted from `docs/serving/question_catalog.md`, using the `databricks-genie` skill's `serialized_space`/`table_identifiers`/`example_question_sqls` model to shape the artifact | Chirag + Claude |
+| 2026-07-21 | Deployed by hand (Chirag, guided step by step by Claude — no MCP write calls). All checklist items done; 3 guardrail tests passed live. Details in `docs/04-serving.md`'s changelog | Chirag + Claude |

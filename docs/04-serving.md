@@ -144,7 +144,7 @@
     (47.7%) — confirms guardrail #5 held, not just #2; (3) "total
     transaction volume in USD this year" correctly labeled the figure as
     multiline-only rather than blending in `ndjson`
-- **Step 6.3 — Dashboard design** ✅ drafted
+- **Step 6.3 — Dashboard design** ✅ drafted and built
   - *Objective:* one tile set per business domain, each backed by catalog SQL
   - *Task:* the dataset SQL (from the catalog) is the reviewed unit; declare
     the dashboard as a `resources/*.yml` DAB entry pointing at a generated
@@ -157,11 +157,19 @@
     cardinality rules, and an illustrative (not-yet-created)
     `resources/dashboard.yml` snippet for later DAB wiring
   - *Validation check:* every tile's underlying query runs and matches the
-    metric model's documented grain — pending: the skill's own mandatory
-    workflow (`get_table_stats_and_schema` → `execute_sql` on every dataset →
-    build JSON → `manage_dashboard`) needs live workspace access this phase
-    intentionally doesn't use; run it by hand or in an explicitly-authorized
-    future session
+    metric model's documented grain — ✅ done, built by hand as "NovaLake
+    Gold Analytics" (3 pages, all 11 datasets). 2 real bugs found and fixed
+    during the build, not caught by the earlier SQL-level review: (1)
+    `ds_approval_decline_rollup` filtered on `current_date()`, which fell in
+    Q3 2026 — outside the dataset's fixed 2026-01-01–06-15 range — producing
+    a `null` KPI; fixed by anchoring to the latest date in `dim_date`
+    instead of the wall clock; (2) the Payment Latency chart silently summed
+    p50/p90 percentiles across the `schedule_status` dimension (percentiles
+    aren't additive across categories, unlike counts); fixed by adding
+    `schedule_status` as a Facet. Every other widget's scale was manually
+    sanity-checked (rates 0–1, ratings 1–5, no stray negative axes) before
+    acceptance. Not yet published or exported/wired into the DAB bundle —
+    still a draft dashboard in the workspace
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: ___
@@ -179,8 +187,10 @@
 - [x] Genie space created in workspace, answers respect Gold's non-equivalence
       guardrails — "NovaLake Gold Analytics", deployed by hand 2026-07-21,
       3 guardrail tests passed live (see Step 6.2 above)
-- [ ] Dashboard created in workspace, every tile backed by a documented Gold
-      model
+- [x] Dashboard created in workspace, every tile backed by a documented Gold
+      model — "NovaLake Gold Analytics", built by hand 2026-07-21, 3 pages /
+      11 datasets, 2 bugs found and fixed live (see Step 6.3 above); not yet
+      published or bundled
 - [ ] Sign-off: ___
 
 ## 10. Key Takeaways
@@ -205,3 +215,4 @@
 | 2026-07-21 | Plan reviewed by Opus before implementation (four corrections made: missing rate-averaging guardrail, all-20-tables Genie scope invites the non-FK join Gold avoided, `.lvdash.json` isn't hand-reviewable the way `dbt_job.yml` is, no shared question→SQL catalog feeding both consumers) — all four folded in above | Chirag + Claude |
 | 2026-07-21 | Steps 6.1–6.3 drafted: `docs/serving/question_catalog.md` (Opus-reviewed, 5 corrections), `docs/serving/genie_space.md`, `docs/serving/dashboard.md`. Nothing deployed to the workspace this session, per `docs/checkpoint.md` — §9 acceptance criteria remain pending until you run the deployment/validation steps each spec file calls out | Chirag + Claude |
 | 2026-07-21 | Genie space ("NovaLake Gold Analytics") deployed by hand, per `docs/checkpoint.md` (Chirag created it in the workspace UI; Claude guided step by step and reviewed the result, no MCP write calls made). Table scope, column exclusion (`original_transaction_id`, `related_transaction_id`), 7-point instructions, and 6 certified query pairs configured per `docs/serving/genie_space.md`. 3 live guardrail tests passed: source-scoped rate recomputation (guardrail #5), never blending support-ticket metrics across sources (guardrail #2), never blending fx-normalized USD into a native-currency total (guardrail #1). §9's Genie criterion checked off | Chirag + Claude |
+| 2026-07-21 | Dashboard ("NovaLake Gold Analytics") built by hand in the workspace, same guided/no-MCP-writes process. 3 pages, all 11 datasets from `docs/serving/dashboard.md`. 2 real bugs found and fixed live, beyond what the SQL-level review caught: `ds_approval_decline_rollup`'s `current_date()` filter fell outside the dataset's fixed historical range (fixed to anchor on `dim_date`'s latest date); the Payment Latency chart silently summed p50/p90 percentiles across `schedule_status` (fixed via Facet). Not yet published or bundled. §9's dashboard criterion checked off | Chirag + Claude |

@@ -49,12 +49,24 @@ across days — that would average the rate (guardrail #5). Use
 
 ### `ds_approval_decline_rollup` (KPI counter — quarter-to-date)
 ```sql
+with latest as (
+    select max(date_day) as max_date from novalake.gold.dim_date
+)
 select
     sum(completed_count) / nullif(sum(completed_count) + sum(failed_count), 0) as approval_rate_qtd
 from novalake.gold.metric_approval_decline_rate m
 join novalake.gold.dim_date d on m.event_date = d.date_day
-where d.year = year(current_date()) and d.quarter = quarter(current_date())
+cross join latest l
+where d.year = year(l.max_date) and d.quarter = quarter(l.max_date)
 ```
+**Bug found and fixed during build (2026-07-21):** the original version
+filtered on `year(current_date())`/`quarter(current_date())` — literally
+"today," which in the deployment environment was 2026-07-21 (Q3 2026). The
+dataset only covers 2026-01-01 through 2026-06-15, so that filter matched
+zero rows and the counter rendered `null`. Fixed by anchoring "current
+quarter" to the latest date actually present in `dim_date` instead of the
+wall clock, so the KPI stays meaningful regardless of when the dashboard is
+viewed relative to a fixed historical synthetic dataset.
 
 ### `ds_refund_rate_by_source`
 ```sql
@@ -79,6 +91,15 @@ select
     p90_lead_days
 from novalake.gold.metric_payout_latency
 ```
+**Chart-building note (found during build, 2026-07-21):** this dataset's
+grain is `(day, source, schedule_status)` — up to 4 `schedule_status` rows
+per `(day, source)`. A chart that only splits by `source` (Color) and plots
+`p50_lead_days`/`p90_lead_days` will silently **sum percentiles across the 4
+statuses** by default, which is meaningless (percentiles aren't additive
+across categories the way counts are — unlike `payout_count`, which sums
+correctly). Any chart on this dataset must add `schedule_status` as a
+**Facet** (or otherwise split by it) so each line represents one true
+`(day, source, schedule_status)` grain point, never a cross-status sum.
 
 ### `ds_support_resolution_time` (ndjson only — never blended with SLA breach)
 ```sql
@@ -153,8 +174,8 @@ skill's chart cardinality guidance, no Top-N bucketing needed.
 | 0 | "NovaLake Gold Analytics" | Text | 12 | 1 | — |
 | 1 | Subtitle | Text | 12 | 1 | — |
 | 2 | Approval rate (QTD) | Counter | 4 | 3 | `ds_approval_decline_rollup` |
-| 2 | Refund rate (by source) | Counter/table | 4 | 3 | `ds_refund_rate_by_source` |
-| 2 | Fraud signals | Counter/table | 4 | 3 | `ds_fraud_signals` |
+| 2 | Refund rate (by source) | Table | 4 | 3 | `ds_refund_rate_by_source` |
+| 2 | Fraud signals | Table | 4 | 3 | `ds_fraud_signals` |
 | 5 | "Trends" | Text | 12 | 1 | — |
 | 6 | Transaction volume by source | Line | 6 | 5 | `ds_transaction_volume` |
 | 6 | Approval/decline trend | Line | 6 | 5 | `ds_approval_decline_trend` |
@@ -162,7 +183,7 @@ skill's chart cardinality guidance, no Top-N bucketing needed.
 **Page 2 — Payouts & Support**
 | y | Widget | Type | Width | Height | Dataset |
 |---|--------|------|-------|--------|---------|
-| 0 | Payout latency (p50/p90) | Line | 6 | 5 | `ds_payout_latency` |
+| 0 | Payout latency (p50/p90), faceted by `schedule_status` | Line | 6 | 5 | `ds_payout_latency` |
 | 0 | Payout count by status | Bar | 6 | 5 | `ds_payout_latency` |
 | 5 | "Support (two separate metrics — never blended)" | Text | 12 | 1 | — |
 | 6 | Avg resolution time (ndjson) | Bar | 6 | 5 | `ds_support_resolution_time` |
@@ -179,6 +200,19 @@ Every row sums to width 12; counters at height 3, charts at height 5, per
 the skill's sizing guidance. The Support page's section header explicitly
 names the non-blending rule so it's visible in the dashboard itself, not
 just in this doc.
+
+## Build status (2026-07-21)
+
+Built by hand in the workspace (Chirag, guided step by step by Claude — no
+`manage_dashboard`/`execute_sql` calls made), as "NovaLake Gold Analytics."
+All 11 datasets created and verified to return real rows; 3 pages
+(**Overview**, **Payouts & Support**, **Reviews, Auth & KYC**) built per the
+layout plan above, with two real issues found and fixed along the way (see
+the notes on `ds_approval_decline_rollup` and `ds_payout_latency` above).
+Every other widget's scale/range was sanity-checked (rates 0–1, ratings
+1–5, no unexplained negative axes) before being accepted. **Not yet
+published, and not yet exported/wired into the bundle** — it exists as a
+draft dashboard in the workspace only.
 
 ## Future DAB wiring (illustrative — not created yet)
 
@@ -204,3 +238,4 @@ Per `docs/adr/0003` (dev-only bundle target until `v0.5`), this stays
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-07-21 | Initial dashboard dataset + layout spec drafted from `docs/serving/question_catalog.md`, following the `databricks-aibi-dashboards` skill's dataset/widget/cardinality rules; full JSON deliberately deferred to the skill's own validation workflow, not hand-authored here | Chirag + Claude |
+| 2026-07-21 | Built by hand in the workspace (Chirag, guided step by step by Claude — no MCP write calls). All 11 datasets and 3 pages created per the plan. 2 bugs found and fixed during build: `ds_approval_decline_rollup`'s `current_date()` filter matched zero rows against the historically-bounded dataset (fixed to anchor on the latest date in `dim_date`); the Payment Latency chart was silently summing percentiles across `schedule_status` (fixed by adding it as a Facet). Not yet published or exported/bundled | Chirag + Claude |

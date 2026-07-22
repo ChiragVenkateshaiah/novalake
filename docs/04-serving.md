@@ -199,7 +199,7 @@
       wired into the DAB bundle, deployed, and published 2026-07-22
       (`resources/dashboard.yml`, `databricks bundle deploy` adopted the
       existing dashboard in place — `dashboard_id`/`create_time` unchanged)
-- [ ] Sign-off: ___
+- [x] Sign-off: Chirag — 2026-07-22
 
 ## 10. Key Takeaways
 - ___

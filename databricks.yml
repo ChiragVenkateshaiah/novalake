@@ -38,6 +38,17 @@ targets:
       # falling back to its env vars. Run locally with `-p DEFAULT` (or
       # set `DATABRICKS_CONFIG_PROFILE=DEFAULT` once) instead of relying on
       # this file to supply it.
+      # `root_path` IS pinned, explicitly, to Chirag's own folder — found
+      # 2026-07-22 via the first real CI run of bundle-validate: without
+      # this, root_path defaults to *whichever identity is deploying*'s own
+      # home folder, so CI (authenticated as novalake-cicd) resolved to
+      # /Workspace/Users/<application-id>/... instead of Chirag's folder.
+      # bundle-deploy would have created a brand-new, parallel job/dashboard
+      # under the service principal's own home instead of adopting the
+      # existing ones — novalake-cicd's CAN_MANAGE grant (docs/checkpoint.md,
+      # 2026-07-22) is specifically on Chirag's folder, so both identities
+      # must resolve to the same path for that grant to mean anything.
+      root_path: /Workspace/Users/chiragvenkatesh92@gmail.com/.bundle/${bundle.name}/${bundle.target}
   # No `prod` target: this is one Free Edition workspace, and a same-
   # workspace "prod" would only be a semantic overlay, not real environment
   # isolation. Real prod/reproducibility is deferred to a future exercise

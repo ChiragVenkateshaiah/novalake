@@ -109,5 +109,7 @@ normalization, reconciliation; see [`docs/02-silver.md`](docs/02-silver.md)).
 rollups) on top of Silver, every fact's row count verified against its source
 `_clean` models; see [`docs/03-gold.md`](docs/03-gold.md).
 
-🚧 `v0.4` Serving not yet started — Genie space on Gold, dashboard/feature
-tables.
+✅ `v0.4` Serving complete on `main` — Genie space ("NovaLake Gold Analytics")
+and a 3-page/11-dataset AI/BI dashboard on Gold, both deployed, validated
+live, and wired into the DAB bundle (`resources/dashboard.yml`); see
+[`docs/04-serving.md`](docs/04-serving.md). Not yet tagged `v0.4`.

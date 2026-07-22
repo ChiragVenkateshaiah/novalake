@@ -1,0 +1,9 @@
+resources:
+  dashboards:
+    novalake_gold_analytics:
+      display_name: "NovaLake Gold Analytics"
+      parent_path: /Workspace/Users/chiragvenkatesh92@gmail.com
+      file_path: ../src/dashboards/novalake_gold_analytics.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: gold

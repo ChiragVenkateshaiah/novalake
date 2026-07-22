@@ -1,0 +1,936 @@
+{
+  "datasets": [
+    {
+      "name": "095b31d6",
+      "displayName": "ds_transaction_volume",
+      "queryLines": [
+        "select\r\n",
+        "    date_trunc('DAY', event_date) as day,\r\n",
+        "    source,\r\n",
+        "    currency_clean,\r\n",
+        "    transaction_count,\r\n",
+        "    completed_count,\r\n",
+        "    gross_amount_major\r\n",
+        "from novalake.gold.metric_transaction_volume"
+      ]
+    },
+    {
+      "name": "2d224aae",
+      "displayName": "ds_approval_decline_trend",
+      "queryLines": [
+        "select\r\n",
+        "    date_trunc('DAY', m.event_date) as day,\r\n",
+        "    m.source,\r\n",
+        "    m.completed_count,\r\n",
+        "    m.failed_count,\r\n",
+        "    m.approval_rate,\r\n",
+        "    m.decline_rate\r\n",
+        "from novalake.gold.metric_approval_decline_rate m"
+      ]
+    },
+    {
+      "name": "2802c30f",
+      "displayName": "ds_approval_decline_rollup",
+      "queryLines": [
+        "with latest as (\r\n",
+        "    select max(date_day) as max_date from novalake.gold.dim_date\r\n",
+        ")\r\n",
+        "select\r\n",
+        "    sum(completed_count) / nullif(sum(completed_count) + sum(failed_count), 0) as approval_rate_qtd\r\n",
+        "from novalake.gold.metric_approval_decline_rate m\r\n",
+        "join novalake.gold.dim_date d on m.event_date = d.date_day\r\n",
+        "cross join latest l\r\n",
+        "where d.year = year(l.max_date) and d.quarter = quarter(l.max_date)"
+      ]
+    },
+    {
+      "name": "c76abda2",
+      "displayName": "ds_refund_rate_by_source",
+      "queryLines": [
+        "select\r\n",
+        "    source,\r\n",
+        "    sum(refund_count) as refund_count,\r\n",
+        "    sum(completed_transaction_count) as completed_transaction_count,\r\n",
+        "    sum(refund_count) / nullif(sum(completed_transaction_count), 0) as refund_rate\r\n",
+        "from novalake.gold.metric_refund_rate\r\n",
+        "group by source"
+      ]
+    },
+    {
+      "name": "96a83a39",
+      "displayName": "ds_payout_latency",
+      "queryLines": [
+        "select\r\n",
+        "    date_trunc('DAY', event_date) as day,\r\n",
+        "    source,\r\n",
+        "    schedule_status,\r\n",
+        "    payout_count,\r\n",
+        "    avg_lead_days,\r\n",
+        "    p50_lead_days,\r\n",
+        "    p90_lead_days\r\n",
+        "from novalake.gold.metric_payout_latency"
+      ]
+    },
+    {
+      "name": "3094275b",
+      "displayName": "ds_support_resolution_time (ndjson only)",
+      "queryLines": [
+        "select priority, avg(resolution_minutes) as avg_resolution_minutes\r\n",
+        "from novalake.gold.fct_support_tickets\r\n",
+        "where source = 'ndjson' and resolved = true\r\n",
+        "group by priority"
+      ]
+    },
+    {
+      "name": "3f098b0a",
+      "displayName": "ds_support_sla_breach_rate (multiline only)",
+      "queryLines": [
+        "select\r\n",
+        "    priority,\r\n",
+        "    sum(breached_count) as breached_count,\r\n",
+        "    sum(ticket_count) as ticket_count,\r\n",
+        "    sum(breached_count) / nullif(sum(ticket_count), 0) as sla_breach_rate\r\n",
+        "from novalake.gold.metric_support_sla_breach_rate_multiline\r\n",
+        "group by priority"
+      ]
+    },
+    {
+      "name": "1c671bd2",
+      "displayName": "ds_fraud_signals",
+      "queryLines": [
+        "select\r\n",
+        "    source,\r\n",
+        "    sum(risk_flagged_count) / nullif(sum(transaction_count), 0) as txn_risk_flagged_rate,\r\n",
+        "    sum(auto_blocked_count) / nullif(sum(alert_count), 0) as alert_auto_block_rate\r\n",
+        "from novalake.gold.metric_fraud_signals\r\n",
+        "group by source"
+      ]
+    },
+    {
+      "name": "cb1c9ccc",
+      "displayName": "ds_ratings_by_category",
+      "queryLines": [
+        "select\r\n",
+        "    m.category,\r\n",
+        "    sum(r.avg_rating * r.rating_count) / nullif(sum(r.rating_count), 0) as avg_rating,\r\n",
+        "    sum(r.rating_count) as rating_count\r\n",
+        "from novalake.gold.metric_review_ratings_by_merchant r\r\n",
+        "join novalake.gold.dim_merchants m on r.merchant_id = m.merchant_id\r\n",
+        "group by m.category"
+      ]
+    },
+    {
+      "name": "8241c508",
+      "displayName": "ds_auth_success_rate",
+      "queryLines": [
+        "select\r\n",
+        "    mfa_used,\r\n",
+        "    count(*) filter (where result = 'success') / nullif(count(*), 0) as success_rate,\r\n",
+        "    count(*) as session_count\r\n",
+        "from novalake.gold.fct_auth_sessions\r\n",
+        "group by mfa_used"
+      ]
+    },
+    {
+      "name": "59fb18aa",
+      "displayName": "ds_kyc_status_share",
+      "queryLines": [
+        "select\r\n",
+        "    source,\r\n",
+        "    status,\r\n",
+        "    count(*) as verification_count,\r\n",
+        "    count(*) / sum(count(*)) over (partition by source) as status_share\r\n",
+        "from novalake.gold.fct_kyc_verifications\r\n",
+        "group by source, status"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "267a03e7",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "0a394c88",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# <span style=\"text-align:center;display:block\"><span style=\"font-size: 48px;line-height: 1.5;\">NovaLake Gold Analytics</span></span>"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "4a0e7568",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Payments, refunds, payouts, support, reviews, risk, auth & KYC across both data sources"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "appro",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "2802c30f",
+                  "fields": [
+                    {
+                      "name": "approval_rate_qtd",
+                      "expression": "`approval_rate_qtd`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": "Approval Rate (QTD)"
+              },
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "approval_rate_qtd"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 2,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "ree",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c76abda2",
+                  "fields": [
+                    {
+                      "name": "completed_transaction_count",
+                      "expression": "`completed_transaction_count`"
+                    },
+                    {
+                      "name": "refund_count",
+                      "expression": "`refund_count`"
+                    },
+                    {
+                      "name": "refund_rate",
+                      "expression": "`refund_rate`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "displayRowNumbers": true,
+              "frame": {
+                "showTitle": true,
+                "title": "Refund Rate by Source"
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "completed_transaction_count"
+                  },
+                  {
+                    "fieldName": "refund_count"
+                  },
+                  {
+                    "fieldName": "refund_rate"
+                  },
+                  {
+                    "fieldName": "source"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 4,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "fraud",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1c671bd2",
+                  "fields": [
+                    {
+                      "name": "alert_auto_block_rate",
+                      "expression": "`alert_auto_block_rate`"
+                    },
+                    {
+                      "name": "txn_risk_flagged_rate",
+                      "expression": "`txn_risk_flagged_rate`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Fraud Signal by Source"
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "alert_auto_block_rate"
+                  },
+                  {
+                    "fieldName": "txn_risk_flagged_rate"
+                  },
+                  {
+                    "fieldName": "source"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 4,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "trra",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "095b31d6",
+                  "fields": [
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    },
+                    {
+                      "name": "monthly(day)",
+                      "expression": "DATE_TRUNC(\"MONTH\", `day`)"
+                    },
+                    {
+                      "name": "sum(gross_amount_major)",
+                      "expression": "SUM(`gross_amount_major`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Transaction Volume Trend"
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "monthly(day)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(gross_amount_major)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "approval",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "2d224aae",
+                  "fields": [
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    },
+                    {
+                      "name": "daily(day)",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "sum(approval_rate)",
+                      "expression": "SUM(`approval_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Approval Rate Trend"
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(day)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(approval_rate)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "1aabfc39",
+      "displayName": "Payouts & Supports",
+      "layout": [
+        {
+          "widget": {
+            "name": "pay",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "96a83a39",
+                  "fields": [
+                    {
+                      "name": "daily(day)",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "sum(p50_lead_days)",
+                      "expression": "SUM(`p50_lead_days`)"
+                    },
+                    {
+                      "name": "sum(p90_lead_days)",
+                      "expression": "SUM(`p90_lead_days`)"
+                    },
+                    {
+                      "name": "schedule_status",
+                      "expression": "`schedule_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "facet": {
+                "type": "wrap",
+                "fieldName": "schedule_status",
+                "scale": {
+                  "type": "categorical"
+                }
+              },
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Payment Latency (p50/p90)"
+              },
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(day)",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "sum(p50_lead_days)"
+                    },
+                    {
+                      "fieldName": "sum(p90_lead_days)"
+                    }
+                  ]
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 5,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "payout",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "96a83a39",
+                  "fields": [
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    },
+                    {
+                      "name": "schedule_status",
+                      "expression": "`schedule_status`"
+                    },
+                    {
+                      "name": "sum(payout_count)",
+                      "expression": "SUM(`payout_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Payout Count by Status"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "schedule_status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(payout_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "source",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 0,
+            "width": 7,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "avg-resolution-time-ndjson-only",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "3094275b",
+                  "fields": [
+                    {
+                      "name": "priority",
+                      "expression": "`priority`"
+                    },
+                    {
+                      "name": "avg_resolution_minutes",
+                      "expression": "`avg_resolution_minutes`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": " Avg Resolution Time — ndjson only"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "priority",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg_resolution_minutes",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "sla-breach-rate-multiline-only",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "3f098b0a",
+                  "fields": [
+                    {
+                      "name": "priority",
+                      "expression": "`priority`"
+                    },
+                    {
+                      "name": "sum(sla_breach_rate)",
+                      "expression": "SUM(`sla_breach_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "SLA Breach Rate — multiline only"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "priority",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(sla_breach_rate)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 6,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "9a3ad8f0",
+      "displayName": "Review, Auth & KYC",
+      "layout": [
+        {
+          "widget": {
+            "name": "avg-rating-by-merchant-category",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cb1c9ccc",
+                  "fields": [
+                    {
+                      "name": "category",
+                      "expression": "`category`"
+                    },
+                    {
+                      "name": "sum(avg_rating)",
+                      "expression": "SUM(`avg_rating`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Avg Rating by Merchant Category"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "category",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(avg_rating)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "auth-success-rate-mfa-usage",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "8241c508",
+                  "fields": [
+                    {
+                      "name": "mfa_used",
+                      "expression": "`mfa_used`"
+                    },
+                    {
+                      "name": "sum(success_rate)",
+                      "expression": "SUM(`success_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Auth Success Rate by MFA Usage"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "mfa_used",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(success_rate)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "kyc-status-share-by-source",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "59fb18aa",
+                  "fields": [
+                    {
+                      "name": "status_share",
+                      "expression": "`status_share`"
+                    },
+                    {
+                      "name": "verification_count",
+                      "expression": "`verification_count`"
+                    },
+                    {
+                      "name": "source",
+                      "expression": "`source`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "KYC Status Share by Source"
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "status_share"
+                  },
+                  {
+                    "fieldName": "verification_count"
+                  },
+                  {
+                    "fieldName": "source"
+                  },
+                  {
+                    "fieldName": "status"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

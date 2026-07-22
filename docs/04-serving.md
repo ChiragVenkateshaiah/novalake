@@ -168,8 +168,14 @@
     aren't additive across categories, unlike counts); fixed by adding
     `schedule_status` as a Facet. Every other widget's scale was manually
     sanity-checked (rates 0–1, ratings 1–5, no stray negative axes) before
-    acceptance. Not yet published or exported/wired into the DAB bundle —
-    still a draft dashboard in the workspace
+    acceptance. Exported to `src/dashboards/novalake_gold_analytics.lvdash.json`
+    and wired into the bundle as `resources/dashboard.yml`
+    (`novalake_gold_analytics`, dev-only per `docs/adr/0003`); deployed via
+    `databricks bundle deploy` (bound to the existing `dashboard_id`, no
+    recreate — required dropping `mode: development`'s auto name-prefix and
+    setting `parent_path` explicitly, see Changelog) and published. Live at
+    `/sql/dashboardsv3/01f184fceb11160fa8d7982ad7bb345b` — see Changelog,
+    2026-07-22
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: ___
@@ -189,8 +195,10 @@
       3 guardrail tests passed live (see Step 6.2 above)
 - [x] Dashboard created in workspace, every tile backed by a documented Gold
       model — "NovaLake Gold Analytics", built by hand 2026-07-21, 3 pages /
-      11 datasets, 2 bugs found and fixed live (see Step 6.3 above); not yet
-      published or bundled
+      11 datasets, 2 bugs found and fixed live (see Step 6.3 above); exported,
+      wired into the DAB bundle, deployed, and published 2026-07-22
+      (`resources/dashboard.yml`, `databricks bundle deploy` adopted the
+      existing dashboard in place — `dashboard_id`/`create_time` unchanged)
 - [ ] Sign-off: ___
 
 ## 10. Key Takeaways
@@ -216,3 +224,5 @@
 | 2026-07-21 | Steps 6.1–6.3 drafted: `docs/serving/question_catalog.md` (Opus-reviewed, 5 corrections), `docs/serving/genie_space.md`, `docs/serving/dashboard.md`. Nothing deployed to the workspace this session, per `docs/checkpoint.md` — §9 acceptance criteria remain pending until you run the deployment/validation steps each spec file calls out | Chirag + Claude |
 | 2026-07-21 | Genie space ("NovaLake Gold Analytics") deployed by hand, per `docs/checkpoint.md` (Chirag created it in the workspace UI; Claude guided step by step and reviewed the result, no MCP write calls made). Table scope, column exclusion (`original_transaction_id`, `related_transaction_id`), 7-point instructions, and 6 certified query pairs configured per `docs/serving/genie_space.md`. 3 live guardrail tests passed: source-scoped rate recomputation (guardrail #5), never blending support-ticket metrics across sources (guardrail #2), never blending fx-normalized USD into a native-currency total (guardrail #1). §9's Genie criterion checked off | Chirag + Claude |
 | 2026-07-21 | Dashboard ("NovaLake Gold Analytics") built by hand in the workspace, same guided/no-MCP-writes process. 3 pages, all 11 datasets from `docs/serving/dashboard.md`. 2 real bugs found and fixed live, beyond what the SQL-level review caught: `ds_approval_decline_rollup`'s `current_date()` filter fell outside the dataset's fixed historical range (fixed to anchor on `dim_date`'s latest date); the Payment Latency chart silently summed p50/p90 percentiles across `schedule_status` (fixed via Facet). Not yet published or bundled. §9's dashboard criterion checked off | Chirag + Claude |
+| 2026-07-22 | Dashboard exported and wired into the DAB bundle: Claude called `manage_dashboard` (`list`/`get`, read-only) to pull the already-built dashboard's `serialized_dashboard` into `src/dashboards/novalake_gold_analytics.lvdash.json`, then authored `resources/dashboard.yml` (`novalake_gold_analytics`, dev-only per `docs/adr/0003`) directly. `databricks bundle validate` passes. This was an explicit, one-off exception to `docs/checkpoint.md`'s "no agent workspace-write access until `v0.5`" rule — Chirag asked for it directly after being shown the tension; logged in checkpoint.md's revisit log, not a rule change. Not yet `bundle deploy`ed or published | Chirag + Claude |
+| 2026-07-22 | Deployed and published, same explicit-exception basis as the export/wire step above. `bundle deploy` initially refused (would delete+recreate the dashboard, changing its ID/URL, since Lakeview dashboards can't rename or move in place). Root cause: `mode: development` on the `dev` target auto-injects a `[dev <user>] ` name prefix that can't be disabled via `presets.name_prefix: ""` (CLI v1.7.0 treats empty string as unset — a Go zero-value quirk) — also found this was silently double-prefixing the job's name via `novalake_medallion`'s own `[${bundle.target}]` convention. Fixed by dropping `mode: development` from `databricks.yml` and re-declaring its two presets that matter (`trigger_pause_status: PAUSED`, `pipelines_development: true`) explicitly; also added explicit `parent_path` to `resources/dashboard.yml` since the bundle's default (`.bundle/novalake/dev/resources`) didn't match the dashboard's actual location. `databricks bundle deployment bind novalake_gold_analytics 01f184fceb11160fa8d7982ad7bb345b` adopted the existing dashboard; `bundle deploy` then updated in place (`dashboard_id`/`create_time` confirmed unchanged after deploy). Published via `manage_dashboard(action="publish")` — live at `/sql/dashboardsv3/01f184fceb11160fa8d7982ad7bb345b`. §9's dashboard criterion fully checked off; sign-off still open | Chirag + Claude |

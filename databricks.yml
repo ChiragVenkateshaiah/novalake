@@ -16,7 +16,17 @@ variables:
 targets:
   dev:
     default: true
-    mode: development
+    # `mode: development` intentionally not set: its auto "[dev <user>] "
+    # name prefix can't be turned off via `presets.name_prefix: ""` (CLI
+    # v1.7.0 treats empty string as unset and re-derives the prefix anyway,
+    # a Go zero-value quirk) — found 2026-07-22 wiring the dashboard, where
+    # it forced a delete+recreate (Lakeview dashboards can't rename in
+    # place) and was silently double-prefixing the job's name on top of its
+    # own "[${bundle.target}]" convention. The two dev-mode presets that
+    # actually matter for future resources are kept explicitly below.
+    presets:
+      trigger_pause_status: PAUSED
+      pipelines_development: true
     workspace:
       # Confirmed via `databricks auth profiles` — DEFAULT is valid and points
       # at this workspace.

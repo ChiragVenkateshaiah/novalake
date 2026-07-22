@@ -1,0 +1,29 @@
+name: Bundle Validate
+
+# Required check on every PR touching the bundle. Validates `dev` -- this
+# project has one Free Edition workspace, so there's no separate `prod`
+# target (see docs/adr/0007); CI/CD automates the same `dev` deployment
+# Chirag previously ran by hand, using the novalake-cicd service principal
+# instead of a personal profile. See docs/adr/0006 for why this is
+# secret-based auth (env vars, no CLI profile) rather than OIDC federation
+# -- Free Edition doesn't expose it.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "databricks.yml"
+      - "resources/**"
+      - "src/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: https://dbc-0fadb959-36a9.cloud.databricks.com
+      DATABRICKS_CLIENT_ID: 3ee2f464-5c6c-4aee-b1b8-792210883a3a # novalake-cicd
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: databricks/setup-cli@dd60b7b133203edca3e8f08b1e053c43a979296e # v1.8.0
+      - run: databricks bundle validate -t dev

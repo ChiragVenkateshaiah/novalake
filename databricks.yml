@@ -28,9 +28,19 @@ targets:
       trigger_pause_status: PAUSED
       pipelines_development: true
     workspace:
-      # Confirmed via `databricks auth profiles` — DEFAULT is valid and points
-      # at this workspace.
-      profile: DEFAULT
-  # prod target intentionally not scaffolded yet — added at v0.5 (CI/CD),
-  # alongside the service-principal deploy it actually requires. Adding it now
-  # would pre-scaffold ahead of the phase that needs it (see docs/checkpoint.md).
+      host: https://dbc-0fadb959-36a9.cloud.databricks.com
+      # `profile:` deliberately not pinned here (was `profile: DEFAULT`
+      # until v0.5) — this target is now deployed by two different
+      # identities: Chirag locally (personal OAuth) and GitHub Actions
+      # (novalake-cicd service principal, env-var auth — see
+      # docs/adr/0006). A hardcoded profile would make CI look for a
+      # `DEFAULT` profile that doesn't exist in the runner instead of
+      # falling back to its env vars. Run locally with `-p DEFAULT` (or
+      # set `DATABRICKS_CONFIG_PROFILE=DEFAULT` once) instead of relying on
+      # this file to supply it.
+  # No `prod` target: this is one Free Edition workspace, and a same-
+  # workspace "prod" would only be a semantic overlay, not real environment
+  # isolation. Real prod/reproducibility is deferred to a future exercise
+  # reproducing this bundle in a genuinely separate workspace via IaC — see
+  # docs/adr/0007. `v0.5`'s CI/CD targets `dev` for real, taking over the
+  # resources already deployed there (see docs/checkpoint.md, 2026-07-22).

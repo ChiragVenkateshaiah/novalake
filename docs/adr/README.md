@@ -13,10 +13,13 @@ log). These ADRs are the formal, one-decision-per-file record for everything els
 Where the two overlap (the DAB-timing reversal touches both), `checkpoint.md`
 carries the narrative and links here for the formal record.
 
-**Source:** all five ADRs below originated from the same planning session —
+**Source:** ADRs 0001–0005 originated from the same planning session —
 [`docs/plan.md`](../plan.md), reviewed by a second model pass before execution.
-See that file for the full discussion; these are the extracted, standalone
-decisions.
+See that file for the full discussion. ADRs 0006–0008 came from `v0.5`
+(CI/CD) — the checkpoint's explicit re-open point for agent-authored IaC —
+after checking this workspace's actual auth capabilities directly rather
+than assuming. 0007–0008 also went through a second-model-pass review
+before being accepted, same discipline as 0001–0005.
 
 ## Index
 
@@ -24,6 +27,9 @@ decisions.
 |-----|-------|--------|
 | [0001](0001-adopt-dab-from-v0.1.md) | Adopt Databricks Asset Bundles from `v0.1`, not `v0.5` | Accepted |
 | [0002](0002-use-dbt-for-silver-gold.md) | Use dbt for Silver→Gold, defer Declarative Pipelines to `v0.7` | Accepted |
-| [0003](0003-dev-only-bundle-target.md) | Keep `databricks.yml` dev-only until `v0.5` (CI/CD) | Accepted |
+| [0003](0003-dev-only-bundle-target.md) | Keep `databricks.yml` dev-only until `v0.5` (CI/CD) | Accepted — partially superseded by 0007 |
 | [0004](0004-local-dbt-development-workflow.md) | Develop dbt locally; reserve the DAB `dbt_task` for orchestrated runs | Accepted |
 | [0005](0005-dbt-schema-generation-convention.md) | Override `generate_schema_name` so dbt schemas map 1:1 to Unity Catalog | Accepted |
+| [0006](0006-secret-based-service-principal-auth-for-cicd.md) | Secret-based service-principal auth for CI/CD, not OIDC federation | Accepted |
+| [0007](0007-defer-prod-no-same-workspace-production-semantics.md) | Defer `prod` — no same-workspace production semantics | Accepted |
+| [0008](0008-novalake-terminus-and-cerberus-succession.md) | NovaLake terminus at `v0.9`; production semantics and Terraform IaC succeed to Cerberus | Accepted |

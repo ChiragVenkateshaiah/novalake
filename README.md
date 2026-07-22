@@ -58,13 +58,26 @@ records behind this shape.
 | `v0.2` | Silver | dbt models + tests: explode/flatten, drift reconciliation, dedupe, DLQ | Real PySpark/SQL transformation, dbt |
 | `v0.3` | Gold | dbt models: business metrics, conformed dimensions | Aggregation, dimensional modeling |
 | `v0.4` | Serving | Genie space on Gold, dashboard/feature tables | Serving patterns, AI/BI |
-| `v0.5` | CI/CD | GitHub Actions, service-principal deploy, `bundle validate` gate, `prod` target | Continuous deployment |
+| `v0.5` | CI/CD | GitHub Actions, service-principal deploy to `dev`, `bundle validate` PR gate | Continuous deployment |
 | `v0.6` | GenAI | Vector Search + Agent Bricks support-assist RAG, text-to-SQL | RAG, agents, eval |
 | `v0.7` | Declarative Pipelines (compare) | Re-implement part of Gold with Lakeflow Declarative Pipelines | Declarative ETL, DQ-as-code, vs. dbt |
+| `v0.8` | *Reserved* | Not yet scoped — see [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md) | — |
+| `v0.9` | Spark optimization (final phase) | Query profiles, `EXPLAIN`, liquid clustering, `OPTIMIZE`, join/skew tuning — within serverless's constraints, on GB-scale regenerated data | Spark optimization NovaLake's compute model can actually expose |
 | — | Cross-cutting | Unity Catalog governance, observability | Continuous, from `v0.1` onward |
 
 Each tag = a tagged GitHub release: the table/asset works, the logic is committed,
 the doc module is filled, and the validation checklist is green.
+
+**`v0.9` is NovaLake's terminus** — there is no `v0.10`. Serverless compute
+structurally can't expose infra-level Spark tuning (no Spark UI, no cluster
+sizing, most `spark.conf` locked) or real dev/prod environment isolation
+(one Free Edition workspace). Rather than fake either inside NovaLake, both
+succeed to a new project, **Cerberus** — AWS, Terraform-first IaC, classic/
+self-managed Spark compute, with NovaPay (the companion payments app) as
+its upstream data producer. See
+[ADR-0007](docs/adr/0007-defer-prod-no-same-workspace-production-semantics.md)
+and [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md)
+for the full reasoning.
 
 ## Repo structure
 
@@ -72,7 +85,7 @@ the doc module is filled, and the validation checklist is green.
 novalake/
 ├── README.md
 ├── CONTRIBUTING.md
-├── databricks.yml         # Asset Bundle root — dev target (prod added at v0.5)
+├── databricks.yml         # Asset Bundle root — dev target only, no prod (see ADR-0007)
 ├── resources/
 │   └── dbt_job.yml        # bronze ingest task -> dbt_task (Silver/Gold)
 ├── src/
@@ -92,9 +105,10 @@ novalake/
 ├── pipelines/             # Lakeflow Declarative Pipeline source (from v0.7, comparative)
 └── .github/workflows/     # CI (from v0.5, deploys via service principal)
 ```
-`pipelines/` and `.github/workflows/` aren't created yet — added when their phase
-starts, not pre-scaffolded. See `docs/checkpoint.md` for the DAB/dbt timing
-decisions and why `pipelines/` moved from `v0.6` to a later comparative phase.
+`pipelines/` isn't created yet — added when `v0.7` starts, not pre-scaffolded.
+`.github/workflows/` was added at `v0.5` (CI/CD), same principle. See
+`docs/checkpoint.md` for the DAB/dbt timing decisions and why `pipelines/`
+moved from `v0.6` to a later comparative phase.
 
 ## Status
 
@@ -109,7 +123,19 @@ normalization, reconciliation; see [`docs/02-silver.md`](docs/02-silver.md)).
 rollups) on top of Silver, every fact's row count verified against its source
 `_clean` models; see [`docs/03-gold.md`](docs/03-gold.md).
 
-✅ `v0.4` Serving complete on `main` — Genie space ("NovaLake Gold Analytics")
-and a 3-page/11-dataset AI/BI dashboard on Gold, both deployed, validated
-live, and wired into the DAB bundle (`resources/dashboard.yml`); see
-[`docs/04-serving.md`](docs/04-serving.md). Not yet tagged `v0.4`.
+✅ `v0.4` Serving complete and merged to `main`, tagged `v0.4` — Genie space
+("NovaLake Gold Analytics") and a 3-page/11-dataset AI/BI dashboard on
+Gold, both deployed, validated live, and wired into the DAB bundle
+(`resources/dashboard.yml`); see [`docs/04-serving.md`](docs/04-serving.md).
+
+🚧 `v0.5` CI/CD in progress — GitHub Actions (`bundle validate` PR gate,
+fail-safe `bundle deploy` on merge) automating the existing `dev` deploy via
+the `novalake-cicd` service principal (secret-based OAuth M2M — Free
+Edition doesn't expose OIDC federation, see
+[ADR-0006](docs/adr/0006-secret-based-service-principal-auth-for-cicd.md)).
+No `prod` target — real production semantics are out of scope for this
+single-workspace project; see
+[ADR-0007](docs/adr/0007-defer-prod-no-same-workspace-production-semantics.md)
+and [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md)
+(NovaLake's terminus at `v0.9`, succeeded by Cerberus). Not yet merged or
+tagged; see [`docs/05-cicd.md`](docs/05-cicd.md).

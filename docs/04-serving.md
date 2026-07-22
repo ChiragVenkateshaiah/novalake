@@ -202,10 +202,94 @@
 - [x] Sign-off: Chirag — 2026-07-22
 
 ## 10. Key Takeaways
-- ___
+- Guardrails don't transfer to a new consumer for free: the same 5 (now 7)
+  rules from Gold had to be re-enforced at the serving layer in two
+  different mechanisms depending on whether the risk was structural
+  (`original_transaction_id`/`related_transaction_id` excluded from the
+  Genie table scope entirely — prose alone won't stop a capable text-to-SQL
+  model from finding a plausible-looking wrong join if the column is
+  reachable) or semantic (fx blending, cross-source metric blending, rate
+  averaging — nothing in the schema signals these are wrong, so only
+  instructions can catch them).
+- A shared question→SQL catalog authored once, before either consumer
+  existed, kept Genie's sample questions and the dashboard's datasets from
+  independently reinventing (and potentially drifting apart on) the same
+  guardrail logic.
+- SQL-level review and actually building the artifact catch different
+  classes of bug: Opus's review of the catalog's SQL confirmed every query
+  was structurally correct, but 2 real bugs only surfaced once the
+  dashboard was built and rendered — a `current_date()` anchoring bug that
+  only manifests against a dataset with a fixed historical range, and a
+  percentile-summing bug that's a property of the widget's chart config,
+  not the underlying SELECT. Spec review and build-time validation are
+  complementary, not substitutes for each other.
+- The rate-averaging guardrail (#5) is the same Simpson's-paradox trap as
+  Gold's own aggregation layer, just recurring one level up at the serving
+  layer — guardrails compound through layers of a lakehouse rather than
+  being solved once and inherited automatically.
+- Wiring an already-built dashboard into a DAB bundle without destroying it
+  is harder than the job-resource case: Lakeview dashboards can't rename or
+  move in place, so `display_name` and `parent_path` both had to match the
+  live object *exactly*, and `mode: development`'s automatic name-prefix
+  turned out to be unsuppressable via its own documented override
+  (`presets.name_prefix: ""` is silently ignored — a CLI Go zero-value
+  quirk, not something `bundle validate` warns about). The safe path was
+  binding the existing resource (`bundle deployment bind`) before ever
+  deploying, and verifying `dashboard_id`/`create_time` were unchanged
+  afterward, rather than trusting the plan output alone.
+- Each new workspace-touching capability (export, then wire, then deploy,
+  then publish) was raised and approved as its own explicit exception to
+  `docs/checkpoint.md`'s hands-on rule, rather than treating one approval as
+  blanket cover for the rest — `bundle deploy` in particular is the exact
+  action the checkpoint names, and it also refused to run destructively
+  without human approval on its own, independent of that project-level rule.
 
 ## 11. Knowledge Check
-- Q1: ___
+- **Q1: Why does the Genie space exclude `original_transaction_id` and
+  `related_transaction_id` from its table scope entirely, instead of just
+  instructing Genie not to join on them?**
+  Both are random UUIDs in both generators — a plausible-looking join, not
+  a real relationship. A prose instruction describes intent, but doesn't
+  remove the model's structural ability to find and use the column anyway
+  if it's present in scope. Schema-level curation is used specifically for
+  guardrails the schema itself invites violating; prose instructions are
+  reserved for guardrails curation *can't* structurally enforce (you can't
+  remove a column to stop someone from blending two valid, present columns
+  the wrong way — fx totals, cross-source support metrics, rate columns —
+  so those stay instruction-only).
+- **Q2: The live "support ticket performance" guardrail test returned a 47%
+  overall breach rate, not the 47.7% you'd get by averaging each priority's
+  `sla_breach_rate`. Why do these differ, and which one is correct?**
+  47% is `sum(breached_count) / sum(ticket_count)` recomputed across all
+  priorities — the correct, count-weighted figure. 47.7% is the unweighted
+  mean of four already-computed per-priority rates, which silently
+  over-represents low-ticket-volume priorities relative to their true share
+  of total tickets. This is guardrail #5's Simpson's-paradox trap, and the
+  live test confirmed it held under a real cross-grain question, not just
+  in the reviewed SQL.
+- **Q3: Why did `bundle deploy` still want to delete and recreate the
+  dashboard even after `display_name` was fixed to match the deployed
+  dashboard exactly?**
+  Two independent mismatches were forcing the recreate, not one: the
+  `display_name` mismatch (fixed first), and a `parent_path` mismatch — the
+  bundle's default is to place the dashboard under its own managed
+  `.bundle/novalake/dev/resources` folder, which differs from where the
+  hand-built dashboard actually lives (`/Users/<email>`). Lakeview
+  dashboards can't rename *or* move in place, so both fields had to match
+  the live object simultaneously before `bundle deploy` would update in
+  place instead of recreating.
+- **Q4: Why did building the dashboard surface 2 real bugs that Opus's
+  SQL-level review of the exact same queries didn't catch?**
+  The review validated that each query was structurally correct in
+  isolation — right joins, right guardrails, right output shape. Neither
+  bug was a SQL-correctness problem: the `current_date()` bug only
+  manifests when the query actually runs against a dataset whose data is
+  historically bounded (not visible from reading the SQL text), and the
+  percentile-summing bug is a property of how the chart widget aggregates
+  across a dimension (`schedule_status`) it wasn't split by — a charting
+  config issue invisible to a review of the underlying `SELECT`. Spec
+  review and build-time validation catch genuinely different failure
+  classes.
 
 ## 12. References
 - Internal: `docs/03-gold.md`, `docs/checkpoint.md`, `docs/architecture.md`,

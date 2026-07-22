@@ -137,5 +137,8 @@ No `prod` target — real production semantics are out of scope for this
 single-workspace project; see
 [ADR-0007](docs/adr/0007-defer-prod-no-same-workspace-production-semantics.md)
 and [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md)
-(NovaLake's terminus at `v0.9`, succeeded by Cerberus). Not yet merged or
-tagged; see [`docs/05-cicd.md`](docs/05-cicd.md).
+(NovaLake's terminus at `v0.9`, succeeded by Cerberus). [PR #5](https://github.com/ChiragVenkateshaiah/novalake/pull/5)
+open — `bundle-validate.yml` is passing (caught and fixed a real
+unpinned-`root_path` bug on its first real run); `bundle-deploy.yml` has
+not run yet, pending a deliberate merge decision since it deploys to the
+live `dev` job/dashboard. See [`docs/05-cicd.md`](docs/05-cicd.md).

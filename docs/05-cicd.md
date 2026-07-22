@@ -143,7 +143,18 @@
     of who's authenticating
   - *Expected output:* updated `databricks.yml`
   - *Validation check:* `databricks bundle validate -t dev` still passes
-    (using `-p DEFAULT` locally now that the profile isn't implicit)
+    (using `-p DEFAULT` locally now that the profile isn't implicit) —
+    **but this validation was misleading**: it only exercised *my*
+    identity locally, and `root_path` was still unpinned at this point.
+    The first real CI run (PR #5) resolved `root_path` to `novalake-cicd`'s
+    *own* home folder instead of Chirag's, since it defaults to whichever
+    identity is deploying. Caught only because that run's log was actually
+    read, not just its pass/fail status — `bundle-deploy` would have
+    created a parallel job/dashboard under the service principal's home
+    instead of adopting the existing ones, silently defeating the whole
+    point of §6.2's grants. Fixed by pinning `root_path` explicitly to
+    Chirag's folder; second CI run confirmed the correct path resolves
+    for either identity
 - **Step 6.4 — GitHub Actions workflows**
   - *Objective:* a required PR check (`bundle validate`) and an
     auto-deploy-on-merge (`bundle deploy`) that fails safe on destructive
@@ -184,8 +195,12 @@
   actually runs and either succeeds or surfaces a missing grant.
 
 ## 9. Validation & Acceptance Criteria
-- [ ] `bundle-validate.yml` passes as a required PR check on this
-      branch's own PR
+- [x] `bundle-validate.yml` passes as a required PR check on this
+      branch's own PR — done 2026-07-22, PR #5. First run passed but
+      resolved the wrong deploy path (CI's identity's own home folder,
+      not Chirag's — see §6.2/Changelog); fixed by pinning `root_path`
+      explicitly, second run confirmed the correct path resolves
+      regardless of deploying identity
 - [ ] `bundle-deploy.yml` successfully deploys `dev` on merge to `main`,
       updating the existing job/dashboard in place (not creating parallel
       copies) — confirms the least-privilege grants in §6.2 are sufficient
@@ -215,3 +230,4 @@
 |------|--------|--------|
 | 2026-07-22 | Module scaffolded. `v0.5` checkpoint re-open decision made (`docs/checkpoint.md`): Claude drafts every file, Chirag approves each one — landed after checking this workspace directly for OIDC support (not available) rather than assuming. `novalake-cicd` service principal + OAuth secret created by hand (Chirag); secret stored only as the GitHub repo secret `DATABRICKS_CLIENT_SECRET`, never seen by Claude. | Chirag + Claude |
 | 2026-07-22 | First-pass design (a `prod` target) reworked after Chirag caught that it was a same-workspace semantic overlay, not real environment isolation. Reworked to: CI/CD automates `dev` (taking over the existing job/dashboard, not a parallel copy); `novalake-cicd` removed from `admins` (auto-added by the creation UI, not deliberate) and granted explicit least-privilege access instead (job/dashboard/bundle-folder `CAN_MANAGE`, UC grants on bronze/silver/gold); `databricks.yml` drops its pinned `dev` profile so both personal and CI auth work against the same target. Produced [ADR-0007](adr/0007-defer-prod-no-same-workspace-production-semantics.md) (supersedes ADR-0003's `prod`-at-`v0.5` timing) and [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md) (NovaLake terminus at `v0.9`; real prod/promotion/infra-Spark-tuning deferred to a new project, Cerberus). Both ADRs reviewed by Opus (second-model-pass) before acceptance; corrections folded in (v0.8 marked reserved rather than silently skipped, an honest rejected-alternative for paid-classic-compute Databricks, a softened serverless-caching claim). `bundle validate -t dev` confirmed passing throughout | Chirag + Claude |
+| 2026-07-22 | PR #5 opened; `bundle-validate.yml` ran for real for the first time. First run passed but exposed a real bug only visible by reading the log, not just the pass/fail badge: with no explicit `root_path`, `dev` resolved to whichever identity was deploying's own home folder — `novalake-cicd`'s application-ID folder in CI, not Chirag's. Would have made `bundle-deploy` create a parallel job/dashboard instead of adopting the existing ones, silently defeating §6.2's grants. Fixed by pinning `root_path` explicitly in `databricks.yml`; second CI run confirmed the correct path for either identity. §9's first criterion checked off | Chirag + Claude |

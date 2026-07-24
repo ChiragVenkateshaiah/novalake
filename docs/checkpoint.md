@@ -1,18 +1,37 @@
 # Checkpoint — Agentic Integration (Claude Code + Databricks MCP)
 
-**Status:** 🟢 Revised 2026-07-16 — see "Revised decision" below. The original
-"DAB later" timing was reversed; the underlying agentic-integration principle
-(no agent-authored IaC until its author has written the equivalent by hand) is
-unchanged and still governs everything below.
+**Status:** 🟢 Re-opened and decided 2026-07-22 for `v0.5` — see the
+2026-07-22 revisit-log entry below. The underlying principle (no
+agent-authored IaC until its author has written the equivalent by hand) is
+unchanged; `v0.5`'s go/no-go landed on a middle path (Claude drafts every
+file, Chirag approves each one) rather than either extreme.
 **Opened:** Project kickoff (v0.0)
-**Re-open at:** start of `v0.5` (CI/CD) — decide go/no-go for agent-authored CI
-config for real. (Original text referenced `v0.5` Lakeflow Jobs / `v0.6`
-Declarative Pipelines; those phases were renumbered/replaced by the roadmap pivot
-below — see "Revised decision.")
+**Next re-open:** start of `v0.6` (GenAI) — the original plan's second
+milestone, where the actual agentic-integration architecture (Claude Code
+CLI + Databricks MCP servers used for real, human-review gate on every
+diff) gets designed, not just individual exceptions granted phase by phase.
 
 > This file exists so the decision below doesn't get re-litigated or forgotten three
 > phases from now. It's the one thing in this repo that documents a *process* choice
 > rather than a *data* one — closer to a software engineering ADR than a data-eng doc.
+
+---
+
+## 📌 Pinned: `v0.9` prerequisite (not an agentic-integration item)
+
+**Date pinned:** 2026-07-22
+
+Before any `v0.9` (Spark optimization within serverless constraints) work
+starts: **regenerate the synthetic payments data at GB scale** (tens of
+millions of events). The current 5–13 MB datasets are too small for
+optimization findings to mean anything — query-plan/liquid-clustering/
+`OPTIMIZE` work on toy-sized data would be noise, not engineering. See
+[`docs/adr/0008`](adr/0008-novalake-terminus-and-cerberus-succession.md)
+(NovaLake terminus at `v0.9`, Cerberus succession) for the full decision
+this prerequisite is part of. Pinned here — not because it's an
+agentic-integration topic, but because this file is what gets read at the
+start of every session (`/start-day`), and this is a fact that must not
+get lost between now and whenever `v0.9` actually starts.
 
 ---
 
@@ -125,3 +144,5 @@ reversal produced that don't belong in this single-topic checkpoint file.
 | 2026-07-16 | DAB-timing and Silver/Gold-tooling decisions reversed (DAB from `v0.1`, dbt replaces Declarative Pipelines as primary Silver/Gold path; DP deferred to `v0.7` as a comparative exercise). See "Revised decision" above. Original reasoning left intact. |
 | 2026-07-22 | One-off, explicitly requested exception during `v0.4`: Claude called `mcp__databricks__manage_dashboard` (`list`/`get`, read-only) to export the already-hand-built "NovaLake Gold Analytics" dashboard's `serialized_dashboard` into `src/dashboards/novalake_gold_analytics.lvdash.json`, then authored `resources/dashboard.yml` directly and ran `databricks bundle validate` to confirm the wiring. No new dashboard content was created or deployed — the dashboard itself was already built by hand on 2026-07-21; this only exported the existing artifact and wired it into the bundle. Chirag explicitly asked for this after being shown the checkpoint tension and choosing to proceed. Logged so it's a visible, deliberate exception, not silent drift from the "no agent workspace-write access until `v0.5`" rule above. Principle still stands going forward — this wasn't a revision of the rule, just a documented one-time exception.|
 | 2026-07-22 | Same one-off exception extended, again explicitly requested, to cover `databricks bundle deploy` and publishing — the two actions the original decision text above names most specifically ("manually deployed with `databricks bundle deploy`"). Claude ran `databricks bundle deployment bind` + `bundle deploy` (after editing `databricks.yml` to drop `mode: development`'s unsuppressable name-prefix, and adding `parent_path` to `resources/dashboard.yml`, both required to make DAB adopt the existing dashboard in place instead of deleting and recreating it — see `docs/serving/dashboard.md`'s "DAB wiring" section for the full technical trail) and `mcp__databricks__manage_dashboard(action="publish")`. Verified `dashboard_id` and `create_time` unchanged post-deploy — the existing hand-built object was adopted, not replaced. The `manage_dashboard(publish)` call was separately blocked by Claude Code's own auto-mode classifier and only proceeded after Chirag retried it explicitly. Still a one-off exception, not a rule change — the "no agent workspace-write access until `v0.5`" principle applies again from here. |
+| 2026-07-22 | **`v0.5` re-open decision made** (this file's actual "Re-open at" trigger, distinct from the `v0.4` exceptions logged above it). Go/no-go for agent-authored CI config: landed on "Claude drafts every file, Chirag approves each one" — not the original plan's "fully hands-off until `v0.6`," and not full autonomy either. Concretely for `v0.5`: Claude authors `databricks.yml`, `resources/*.yml`, both GitHub Actions workflows, and the CI-relevant ADRs as drafts on `feat/v0.5-cicd`; Chirag reviews before merge. Identity-creation stayed hands-on regardless — Chirag created the `novalake-cicd` service principal and its OAuth secret himself, storing the secret directly as a GitHub Actions repo secret (Claude never saw the value). Also discovered live: Free Edition workspaces don't expose OIDC/federation policy configuration for service principals (checked directly — no "Federation policies" tab, no separate Account Console reachable), which is *why* CI/CD ended up secret-based rather than the more-preferred federated approach — a platform constraint, not a choice against it (see ADR-0006). |
+| 2026-07-22 | **`v0.5` design corrected: no `prod` target after all.** The first pass (logged in the entry above) added a `databricks.yml` `prod` target — same workspace, distinguished only by deploying identity/mode. Chirag caught that this was a semantic overlay, not real environment isolation, and redirected: CI/CD targets `dev` for real (taking over the existing hand-deployed job/dashboard, not a parallel copy), and real production semantics are deferred to a separate future project rather than faked in-workspace. This produced [ADR-0007](adr/0007-defer-prod-no-same-workspace-production-semantics.md) (supersedes ADR-0003's `prod`-at-`v0.5` timing) and [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md) (NovaLake gets a defined terminus at `v0.9`; a new project, Cerberus, on AWS/Terraform, is where real prod/promotion/infra-Spark-tuning will actually live — see the pinned `v0.9` prerequisite above). Both ADRs went through an Opus second-model-pass review before acceptance, same discipline as ADRs 0001–0005; the review's corrections (v0.8 explicitly marked reserved rather than silently skipped, an honestly-argued rejected alternative for paid-classic-compute Databricks, a softened claim about serverless caching) are folded into the final text. Making `novalake-cicd` actually manage the existing `dev` resources also required removing it from the `admins` group it was auto-added to on creation (not a deliberate choice) and granting narrower, explicit access instead: `CAN_MANAGE` on the bundle's deployment folder, the job, and the dashboard specifically, plus Unity Catalog grants (`USE_CATALOG`/`USE_SCHEMA`/`SELECT`/`MODIFY`/`CREATE_TABLE`) on `bronze`/`silver`/`gold` — done directly via CLI once Chirag confirmed the least-privilege direction. |

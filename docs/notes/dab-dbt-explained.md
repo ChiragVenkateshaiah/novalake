@@ -34,10 +34,12 @@ Why this matters beyond "now there are more files to maintain":
   the repo. No "who changed the cluster config in the UI and didn't tell anyone."
 - **Code review on infrastructure.** A change to how the job runs is a diff in
   `resources/dbt_job.yml` that goes through a PR, same as application code.
-- **Multi-environment deploys.** The same bundle can deploy to a `dev` target
-  and (later) a `prod` target with different names/paths/identities, driven by
-  one `-t` flag. (NovaLake is deliberately dev-only for now — see ADR-0003 — but
-  the machinery is there.)
+- **Multi-environment deploys.** DAB's `-t` flag is how a bundle *can* deploy to
+  different targets with different names/paths/identities in general. NovaLake
+  deliberately never uses that beyond `dev`, though — one Free Edition
+  workspace means a same-workspace `prod` would only be a semantic overlay, not
+  real environment isolation. See [ADR-0007](../adr/0007-defer-prod-no-same-workspace-production-semantics.md)
+  and [ADR-0008](../adr/0008-novalake-terminus-and-cerberus-succession.md).
 - **CI/CD readiness.** `databricks bundle validate` is a real schema/consistency
   check you can run in GitHub Actions on every PR before anything deploys. It's
   the gate that turns "the YAML probably parses" into "the YAML is provably
@@ -184,8 +186,14 @@ Declares `bundle.name: novalake`, includes `resources/*.yml`, and defines two
 variables: `catalog` (default `novalake`) and `warehouse_id`. `warehouse_id`
 uses a `lookup:` by name (`"Serverless Starter Warehouse"`) rather than a
 hardcoded hex ID — so it survives the warehouse being recreated, which happens on
-Free Edition. One target, `dev` (default, `mode: development`, `profile:
-DEFAULT`). `prod` is intentionally absent until v0.5 — ADR-0003.
+Free Edition. One target, `dev` (default) — `mode: development` was removed
+during `v0.4` (its automatic `[dev <user>] ` name prefix broke deploying an
+already-existing dashboard in place; the two presets that actually mattered
+were kept explicitly instead), and `workspace.profile` was removed during
+`v0.5` (`dev` is now deployed by two different identities — Chirag locally,
+`novalake-cicd` in CI — so the target can't hardcode a personal profile; run
+locally with `-p DEFAULT`). No `prod` target, permanently — not just "not yet."
+See [ADR-0007](../adr/0007-defer-prod-no-same-workspace-production-semantics.md).
 
 ### `resources/dbt_job.yml` — the job
 
@@ -240,10 +248,12 @@ output actually lives. `databricks bundle summary` prints direct links to most o
 this.
 
 **Workflows / Jobs.** Left nav → **Workflows** → **Jobs** tab. The job appears
-as `[dev chiragvenkatesh92] [dev] novalake bronze-to-silver`. The double prefix
-is normal: the configured name is `[${bundle.target}] novalake bronze-to-silver`
-(→ `[dev] ...`), and `mode: development` additionally prepends `[dev <username>]`
-so dev deploys never collide with a future prod job. Open it to see the two-task
+as `[dev] novalake bronze-to-silver` — just the one prefix, from the configured
+name `[${bundle.target}] novalake bronze-to-silver`. (Earlier in `v0.4` this
+briefly showed up double-prefixed, `[dev <username>] [dev] ...` — `mode:
+development`'s automatic name prefix stacking with this one. That's why `mode:
+development` was removed from `databricks.yml`'s `dev` target; see the
+`databricks.yml` section above.) Open it to see the two-task
 graph (`bronze_ingest` → `dbt_silver_gold`), the run history, and — click into a
 run, then a task — the driver logs (stdout/stderr). This is where `Wrote 7105
 rows...` and the `dbt run`/`dbt test` output show up.

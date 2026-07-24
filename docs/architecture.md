@@ -76,6 +76,14 @@ primary development; see [ADR-0004](adr/0004-local-dbt-development-workflow.md).
 
 ## Targets
 
-Only `dev` exists today (`databricks.yml`). `prod` is intentionally not
-pre-scaffolded — it arrives at `v0.5` (CI/CD) alongside the service-principal
-deploy it actually requires. See [ADR-0003](adr/0003-dev-only-bundle-target.md).
+Only `dev` exists (`databricks.yml`) — and only ever will. There is no
+`prod` target: this project runs on one Databricks Free Edition workspace,
+and a same-workspace `prod` would only be a semantic overlay (different
+deploying identity, same catalog, same everything else), not real
+environment isolation. `v0.5` (CI/CD) automates deploying `dev` via a
+service principal instead of a personal profile, rather than introducing a
+second target. Real production semantics are out of scope for NovaLake
+entirely — see [ADR-0007](adr/0007-defer-prod-no-same-workspace-production-semantics.md)
+and [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md)
+(NovaLake's terminus at `v0.9`, succeeded by a separate project, Cerberus,
+where real prod/promotion actually belongs).

@@ -1,0 +1,32 @@
+name: Bundle Deploy
+
+# Deploys `dev` on every push to main (i.e. after a PR merges and Bundle
+# Validate has already passed as a required check), taking over the same
+# job/dashboard Chirag previously deployed by hand -- novalake-cicd was
+# granted explicit CAN_MANAGE on that bundle folder, the job, and the
+# dashboard specifically for this (see docs/checkpoint.md, 2026-07-22;
+# least-privilege, not the workspace-admin access it got by default when
+# created). Deliberately does NOT pass --auto-approve: if a change would be
+# destructive (e.g. a Lakeview dashboard needing delete+recreate, as hit
+# manually during v0.4 -- see docs/checkpoint.md, 2026-07-22), `bundle
+# deploy` refuses and this job fails instead of silently applying it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "databricks.yml"
+      - "resources/**"
+      - "src/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: https://dbc-0fadb959-36a9.cloud.databricks.com
+      DATABRICKS_CLIENT_ID: 3ee2f464-5c6c-4aee-b1b8-792210883a3a # novalake-cicd
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: databricks/setup-cli@dd60b7b133203edca3e8f08b1e053c43a979296e # v1.8.0
+      - run: databricks bundle deploy -t dev

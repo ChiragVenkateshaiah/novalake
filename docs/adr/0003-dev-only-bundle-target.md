@@ -1,8 +1,15 @@
 # ADR-0003: Keep `databricks.yml` dev-only until `v0.5` (CI/CD)
 
-**Status:** Accepted
+**Status:** Accepted — timing partially superseded by
+[ADR-0007](0007-defer-prod-no-same-workspace-production-semantics.md)
+(2026-07-22): `v0.5` did **not** add a `prod` target after all, since
+Free Edition's single workspace means one would only be a same-workspace
+semantic overlay, not real environment isolation. This ADR's other
+content — the anti-pre-scaffolding reasoning, `dev` as the sole target
+through `v0.4` — remains accurate history; only "`prod` is added at
+`v0.5`" (Decision, below) no longer holds.
 **Date:** 2026-07-16
-**Related:** [ADR-0001](0001-adopt-dab-from-v0.1.md)
+**Related:** [ADR-0001](0001-adopt-dab-from-v0.1.md), [ADR-0007](0007-defer-prod-no-same-workspace-production-semantics.md)
 
 ## Context
 

@@ -150,3 +150,20 @@ its first real run; `bundle-deploy.yml` ran for real on merge and
 succeeded, deploying to the existing `dev` job/dashboard in place (verified
 directly in the workspace UI, no parallel copies). See
 [`docs/05-cicd.md`](docs/05-cicd.md).
+
+🚧 `v0.6` GenAI in progress — scoping merged to `main`
+([PR #6](https://github.com/ChiragVenkateshaiah/novalake/pull/6)):
+[ADR-0009](docs/adr/0009-agentic-integration-mcp-gated-review-then-act.md)
+(Claude may invoke Databricks MCP actions directly from `v0.6` on, gated
+by per-action review — the checkpoint's `v0.6` re-open, fulfilled), a new
+root `CLAUDE.md`, and `docs/06-genai.md` scaffolded with RAG built before
+text-to-SQL, one `v0.6`. RAG build underway on `feat/v0.6-genai` (not yet
+merged): `fct_support_tickets.description` and `fct_reviews.title`/`body`
+promoted to Gold as the RAG corpus (no PII, verified against generator
+source and live data); two new physical Delta tables
+(`rag_support_ticket_corpus`, `rag_review_corpus`) since Gold's other
+models are views and Vector Search needs a table; two live, validated
+Vector Search indexes on a shared `novalake-rag` endpoint — `rag_support_
+ticket_index` (1255/1255 rows) and `rag_review_index` (1034/1034 rows),
+both retrieval-tested with real queries. See
+[`docs/06-genai.md`](docs/06-genai.md).

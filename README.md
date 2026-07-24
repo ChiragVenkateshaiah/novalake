@@ -85,6 +85,7 @@ for the full reasoning.
 novalake/
 ├── README.md
 ├── CONTRIBUTING.md
+├── CLAUDE.md              # repo-aware conventions + agentic-access rules (from v0.6)
 ├── databricks.yml         # Asset Bundle root — dev target only, no prod (see ADR-0007)
 ├── resources/
 │   └── dbt_job.yml        # bronze ingest task -> dbt_task (Silver/Gold)
@@ -101,12 +102,17 @@ novalake/
 ├── docs/
 │   ├── checkpoint.md      # pinned process decisions (e.g. agentic integration timing)
 │   ├── _skeleton.md        # reusable doc module template
-│   └── 00-setup.md, ...    # one filled module per phase
+│   ├── adr/                # one-decision-per-file architecture records
+│   └── 00-setup.md, ...    # one filled module per phase, incl. 06-genai.md
 ├── pipelines/             # Lakeflow Declarative Pipeline source (from v0.7, comparative)
 └── .github/workflows/     # CI (from v0.5, deploys via service principal)
 ```
 `pipelines/` isn't created yet — added when `v0.7` starts, not pre-scaffolded.
-`.github/workflows/` was added at `v0.5` (CI/CD), same principle. See
+`.github/workflows/` was added at `v0.5` (CI/CD), same principle. A `v0.6`
+GenAI source location (e.g. `src/genai/`) and its DAB resource file(s) (e.g.
+`resources/vector_search.yml`) are likewise not pre-scaffolded — `v0.6` is
+currently in the scoping stage (`docs/06-genai.md`, `docs/adr/0009-*.md`);
+build artifacts get added when that work actually starts. See
 `docs/checkpoint.md` for the DAB/dbt timing decisions and why `pipelines/`
 moved from `v0.6` to a later comparative phase.
 

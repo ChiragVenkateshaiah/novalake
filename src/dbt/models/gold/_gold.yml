@@ -194,13 +194,18 @@ models:
       resolution_minutes (ndjson-only) and sla_target_minutes/sla_breached
       (multiline-only) are deliberately separate, non-equivalent column
       pairs -- see model comment. related_transaction_id is a random UUID,
-      never a real FK -- not FK-tested.
+      never a real FK -- not FK-tested. description promoted at v0.6 as the
+      RAG corpus field for docs/06-genai.md's support-assist index --
+      confirmed no PII (templated, no name/email interpolation).
     columns:
       - name: ticket_key
         tests:
           - unique
           - not_null
       - name: event_id
+        tests:
+          - not_null
+      - name: description
         tests:
           - not_null
       - name: source
@@ -236,14 +241,22 @@ models:
 
   - name: fct_reviews
     description: >
-      UNION ALL of both sources' review.submitted clean models. title/body
-      free text excluded (no current consumer). helpful_votes is ndjson-only.
+      UNION ALL of both sources' review.submitted clean models. helpful_votes
+      is ndjson-only. title/body un-excluded at v0.6 as the second RAG corpus
+      field for docs/06-genai.md's support-assist index -- confirmed no PII
+      (templated, no name/email interpolation).
     columns:
       - name: review_key
         tests:
           - unique
           - not_null
       - name: event_id
+        tests:
+          - not_null
+      - name: title
+        tests:
+          - not_null
+      - name: body
         tests:
           - not_null
       - name: source

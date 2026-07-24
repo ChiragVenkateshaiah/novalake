@@ -7,6 +7,16 @@
 -- metric_support_sla_breach_rate_multiline for the same split at the metric
 -- layer. related_transaction_id is a random UUID, never a real FK -- kept
 -- informational, not FK-tested.
+--
+-- description promoted from Silver-only at v0.6 (was deferred per
+-- docs/checkpoint.md's "no later-phase tooling early" principle -- see the
+-- standing comment on int_support_tickets.sql) -- this is the RAG corpus
+-- field for v0.6a's support-assist index (docs/06-genai.md Step 6.1).
+-- messages[]/thread replies deliberately NOT promoted here: confirmed
+-- against both generators (generate_events.py/generate_multiline.py) that
+-- agent/customer reply text is drawn from a 5-string fixed pool per role --
+-- only the first message (== description) has real per-instance diversity,
+-- so the thread adds boilerplate, not corpus value, for v0.6a's scope.
 
 with ndjson as (
     select
@@ -20,6 +30,7 @@ with ndjson as (
         channel,
         priority,
         subject,
+        description,
         related_transaction_id,
         resolved,
         resolution_minutes,
@@ -40,6 +51,7 @@ multiline as (
         channel,
         priority,
         subject,
+        description,
         related_transaction_id,
         cast(null as boolean) as resolved,
         cast(null as int) as resolution_minutes,

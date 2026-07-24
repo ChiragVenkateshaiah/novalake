@@ -79,36 +79,59 @@ of that gate before running any step below.
 
 ## 5. Data Contract / Schema in Scope
 
-**RAG corpus — named explicitly, not yet fully in Gold:**
-- `fct_support_tickets.subject` — already Gold.
-- `fct_support_tickets.description` / `messages[]` — **Silver-only today.**
-  `int_support_tickets.sql` carries a standing comment: *"description is
-  free text — kept as-is, this is the field the eventual GenAI layer will
-  index, not something to 'clean'."* The `messages` array is exploded at
-  Silver (`int_support_ticket_messages.sql`, grain `event_id` +
-  `message_index`); the exact subfield holding message text needs
-  build-time confirmation. Decide at build time whether this needs a new
-  Gold model (e.g. `fct_support_ticket_messages`) or an extended
-  `fct_support_tickets`.
-- `fct_reviews.title` / `body` — **excluded from Gold today**
-  (`fct_reviews.sql`: "title/body free text excluded ... same GenAI-deferral
-  precedent as ticket description"). Decide whether to un-exclude — a
-  code-comment reversal, not an ADR supersession.
-- `fct_refunds.reason`/`notes`, `fct_risk_alerts.notes` — candidates, not yet
-  decided in/out. Don't silently include everything; name each field's
-  status explicitly before it's indexed.
+**RAG corpus — decided 2026-07-24 (Step 6.1), promoted to Gold:**
+- `fct_support_tickets.description` — promoted from Silver-only. Widened
+  `fct_support_tickets.sql` (both `ndjson`/`multiline` CTEs) and `_gold.yml`
+  (new `not_null` test); no new Gold model needed — `description` is a
+  scalar per ticket, already flowed through Silver's clean models
+  (`select *`), only Gold's explicit column list excluded it.
+- `fct_reviews.title` / `fct_reviews.body` — un-excluded. Same pattern:
+  widened `fct_reviews.sql` and `_gold.yml`, no new model.
+- **Explicitly excluded from v0.6a's corpus, decided not deferred:**
+  - `messages[]` (ticket thread) — checked both generators
+    (`generate_events.py`/`generate_multiline.py`) directly: only the first
+    message (which duplicates `description`) has real per-instance
+    diversity. Every agent reply is drawn from a 5-string fixed pool;
+    every subsequent customer reply from a separate 5-string fixed pool.
+    Indexing the full thread would add boilerplate, not corpus value, for
+    the effort of a new Gold model (`event_id` + `message_index` grain,
+    two sources unioned). Revisit only if the generators change to produce
+    genuinely varied reply text.
+  - `fct_refunds.reason` — checked the generator: this is a **closed
+    5-value enum** (`customer_request`, `duplicate_charge`,
+    `item_not_received`, `fraudulent`, `merchant_error`), not free text
+    despite the field name. Not a RAG candidate at all — a categorical
+    column, not something embeddings would add value over.
+  - `fct_refunds.notes` — `maybe("Refund approved after review.", 0.6,
+    None)` in the generator: either null or one fixed constant string.
+    Zero information content once tokenized.
+  - `fct_risk_alerts.notes` — `random.choice(RISK_NOTES)`, a fixed
+    5-string pool (`generate_events.py`'s `RISK_NOTES`). Same reasoning as
+    the message thread: closed-set text gets no benefit from semantic
+    search over exact-match lookup.
+  - Known dataset characteristic, not a defect: both promoted corpus
+    fields are `.format()`-templated (8 ticket-description templates × 6
+    review title/body pairs, parameterized by amount/currency/merchant/
+    OS/days). Retrieval will discriminate reliably by
+    template-plus-merchant, less so by deep semantic nuance — worth
+    keeping in mind when designing Step 6.5's eval set so it isn't
+    graded against an expectation the data can't support.
 
-**PII / sensitive-data policy — a scoping decision, recorded here, not a
-build-time afterthought.** Structured Gold facts were safe to serve because
-they're IDs/numbers; the free-text fields above are exactly where customer
-names, emails, and free-text transaction references live. Embedding raw
-free text into a Vector Search index that a chat agent can retrieve and
-surface verbatim creates a PII-retrieval surface that doesn't exist today.
-**Decision to make before the first field above is embedded:** whether to
-mask/redact (`ai_mask`, UC classification tagging) before indexing — this
-may change the Gold model shape itself (e.g. a `description_redacted`
-column vs. raw `description`). Record the decision here once made; see §8
-for the governance framing.
+**PII / sensitive-data policy — decided 2026-07-24: no masking needed,
+verified not assumed.** Checked both generators' source directly
+(`build_support_ticket`/`build_support`/`build_review` in
+`generate_events.py`/`generate_multiline.py`): ticket descriptions and
+review bodies are `.format()`-filled only with `{amount, currency,
+merchant, os, days}` — never a customer name, email, or identifier.
+Customer names exist elsewhere in the dataset (e.g. KYC's `full_name`) but
+are never interpolated into ticket/review text. Confirmed live against the
+actual materialized `gold.fct_support_tickets`/`gold.fct_reviews` data
+(`SELECT description ... ORDER BY RAND() LIMIT 8`, same for `title`/`body`)
+— no PII surfaced in either sample. **Re-verify this finding if the data
+generators are ever changed or regenerated** (e.g. before the `v0.9`
+GB-scale regen named in `docs/checkpoint.md`'s pinned prerequisite) — this
+decision is evidence-based for the current generators, not a permanent
+guarantee.
 
 - Target schema (produced): not yet defined — depends on the embedding/
   index-shape decision in §6.2
@@ -119,12 +142,21 @@ for the governance framing.
 
 **Step-group A — RAG / support-assist (build before Step-group B):**
 
-- **Step 6.1 — RAG corpus decision**
+- **Step 6.1 — RAG corpus decision** ✅ done 2026-07-24
   - *Objective:* finalize which Gold/Silver text fields form the corpus (see
     §5) and whether new Gold models are needed
-  - *Task:* ___
-  - *Expected output:* ___
-  - *Validation check:* ___
+  - *Task:* read both generators' source directly rather than assume from
+    field names (`refund.reason` looked free-text, was actually a closed
+    enum); widen `fct_support_tickets.sql`/`fct_reviews.sql` and `_gold.yml`
+    with the decided fields; confirm no new Gold model was needed
+  - *Expected output:* `description` added to `fct_support_tickets`,
+    `title`/`body` added to `fct_reviews`, both with `not_null` tests; §5
+    above records the full decision + evidence trail
+  - *Validation check:* `dbt run --select fct_support_tickets fct_reviews`
+    — both built clean; `dbt test --select fct_support_tickets fct_reviews`
+    — 27/27 passed including the 3 new `not_null` tests; live `SELECT`
+    sample against `gold.fct_support_tickets`/`gold.fct_reviews` (8 rows
+    each) confirmed no PII, consistent with the generator-source finding
 - **Step 6.2 — Embedding + chunking strategy**
   - *Objective:* decide one Vector Search endpoint, one index per corpus
     source vs. one combined index with a `source_table` metadata column;
@@ -207,8 +239,10 @@ for the governance framing.
   `docs/serving/genie_space.md` (fx-blending, support-metric-blending,
   no-UUID-joins, rate-averaging), carried forward per §4/§6.7 — see
   `CLAUDE.md`'s "Known data guardrails" section for the standing copy
-- **PII/redaction policy for the RAG corpus:** decision pending — see §5.
-  Record the final decision here once made, before Step 6.3 embeds anything.
+- **PII/redaction policy for the RAG corpus:** decided 2026-07-24, no
+  masking needed — verified against both generators' source and the live
+  materialized data, not assumed. Full evidence trail in §5. Must be
+  re-verified if the data generators change.
 - Quarantine / reject handling: ___
 - Lineage & catalog tags: ___
 - Ownership & access: MCP-gated actions per ADR-0009 govern who/what can
@@ -217,7 +251,9 @@ for the governance framing.
   `docs/checkpoint.md`'s revisit-log (see ADR-0009 §3)
 
 ## 9. Validation & Acceptance Criteria
-- [ ] RAG corpus + PII policy decided and recorded (§5)
+- [x] RAG corpus + PII policy decided and recorded (§5) — 2026-07-24,
+      `fct_support_tickets.description` + `fct_reviews.title`/`body`,
+      no masking needed (verified against generator source + live data)
 - [ ] Vector Search index live, queryable, results grounded per eval (§6.5)
 - [ ] Text-to-SQL surface live, inheriting Genie's guardrails, correctness
       eval passing (§6.8)
@@ -246,3 +282,4 @@ for the governance framing.
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-07-24 | Module scaffolded during `v0.6` scoping. RAG-before-text-to-SQL sequencing and the RAG-corpus/PII gaps named explicitly (§5); step-groups A/B laid out in §6. Build not started — this is the scoping-only artifact per `docs/adr/0009-*.md`. | Chirag + Claude |
+| 2026-07-24 | **Step 6.1 (RAG corpus decision) done**, first build step. Checked both data generators' source directly rather than assuming from field/schema names: `refund.reason` turned out to be a closed 5-value enum despite the name, `refund.notes`/`risk_alert.notes` are near-constant or drawn from tiny fixed pools, and ticket message-thread replies are also closed-set boilerplate beyond the first message. Narrowed the RAG corpus to `fct_support_tickets.description` + `fct_reviews.title`/`body` only — no new Gold model needed, both fields already flowed through Silver untouched, just widened the two existing fact tables and `_gold.yml`. PII policy decided: no masking needed, verified against generator source and confirmed live against the materialized Gold tables (8-row samples of each field, no PII found). `dbt run`/`dbt test` both green (27/27) on the widened models. Both decisions and the technical scope narrowing were confirmed with Chirag before implementation, given they deviated from §5's original tentative candidate list. | Chirag + Claude |

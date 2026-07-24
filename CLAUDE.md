@@ -151,18 +151,28 @@ GenAI-agent response, not just the existing serving layer:
 2. Never blend support-ticket performance across sources. `resolution_minutes`
    (real elapsed time) exists only for `ndjson`; `sla_breached`/
    `sla_target_minutes` (target/breach flag) exist only for `multiline`.
-   Report these as two separate answers, never one blended number.
-3. Never join `fct_refunds` or `fct_support_tickets` to `fct_transactions` on
-   `original_transaction_id` or `related_transaction_id` — both are
+   Always report these as two separate answers, never one "support
+   performance" number.
+3. Never join `fct_refunds` or `fct_support_tickets` to `fct_transactions`
+   on `original_transaction_id` or `related_transaction_id` — both are
    independently random UUIDs in both source generators, not real foreign
-   keys, and were deliberately excluded from the Genie space's column
-   visibility for exactly this reason. Use aggregate ratios grouped by
-   `(event_date, source)` instead.
+   keys. Use aggregate ratios grouped by `(event_date, source)` instead.
 4. Every `metric_*` table's rate column (`approval_rate`, `decline_rate`,
    `refund_rate`, `sla_breach_rate`, `verified_purchase_rate`) is
-   pre-computed at a specific grain. Any question spanning a coarser grain
-   must recompute the rate from the underlying counts each metric table also
-   exposes — never average the rate column itself (Simpson's-paradox trap).
+   pre-computed at a specific grain (`event_date`, `source`, sometimes
+   `priority`). Any question spanning a coarser grain (a quarter, a
+   category, "overall") must recompute the rate from the underlying counts
+   each metric table also exposes — never average the rate column itself.
+
+(Guardrails 1–4 above are `docs/serving/genie_space.md`'s instructions #1,
+#2, #3, and #5 respectively, copied verbatim — not paraphrased — so this
+file can't silently drift from the source of truth. Two facts worth having
+here that aren't part of the verbatim text: #3's UUID columns were
+*structurally excluded* from the Genie space's column visibility, not just
+instructed against, because a capable text-to-SQL model can find and use a
+present column even against a prose instruction; #4 is a Simpson's-paradox
+trap — averaging a pre-computed rate across a coarser grain gives a
+different, wrong number than recomputing from underlying counts.)
 
 Full instruction set (including expected-data-quirk notes, not just these
 adversarial-misuse guardrails) and the certified question→SQL pairs that pin

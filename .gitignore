@@ -22,6 +22,8 @@ Thumbs.db
 !.claude/commands/
 .ai-dev-kit/
 .mcp.json
+.mcp.json.bak
+.github/skills/
 
 # Raw data artifacts (these live in the UC Volume, not in Git — see CONTRIBUTING.md)
 data/raw/

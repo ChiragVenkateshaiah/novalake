@@ -36,3 +36,14 @@ models:
         # being declared separately).
         +schema: gold
         +materialized: view
+      genai:
+        # RAG corpus tables (v0.6) — the one deliberate exception to Gold's
+        # view-only convention. Vector Search's Delta Sync index requires a
+        # physical Delta table to sync from; these exist purely as that
+        # source, not as new Gold facts. CDF enabled so Vector Search's
+        # incremental sync (including deletions) works correctly — see
+        # docs/06-genai.md Step 6.2.
+        +schema: gold
+        +materialized: table
+        +tblproperties:
+          delta.enableChangeDataFeed: 'true'

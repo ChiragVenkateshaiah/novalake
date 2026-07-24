@@ -133,10 +133,16 @@ GB-scale regen named in `docs/checkpoint.md`'s pinned prerequisite) — this
 decision is evidence-based for the current generators, not a permanent
 guarantee.
 
-- Target schema (produced): not yet defined — depends on the embedding/
-  index-shape decision in §6.2
-- Schema-evolution policy: not applicable yet
-- Keys / grain / uniqueness: not applicable yet
+- Target schema (produced): `novalake.gold.rag_support_ticket_corpus`
+  (grain: one row per ticket, PK `ticket_key`) and
+  `novalake.gold.rag_review_corpus` (grain: one row per review, PK
+  `review_key`) — physical Delta tables, CDF-enabled, decided at Step 6.2
+  as Vector Search's required Delta Sync source (Gold's other models are
+  views, which Delta Sync can't read from directly)
+- Schema-evolution policy: not applicable yet — static synthetic dataset,
+  no upstream schema drift expected at this grain
+- Keys / grain / uniqueness: `ticket_key`/`review_key`, both `unique` +
+  `not_null` tested, matching their source fact tables' grain exactly
 
 ## 6. Step-by-Step Implementation
 
@@ -157,13 +163,45 @@ guarantee.
     — 27/27 passed including the 3 new `not_null` tests; live `SELECT`
     sample against `gold.fct_support_tickets`/`gold.fct_reviews` (8 rows
     each) confirmed no PII, consistent with the generator-source finding
-- **Step 6.2 — Embedding + chunking strategy**
+- **Step 6.2 — Embedding + chunking strategy** ✅ done 2026-07-24
   - *Objective:* decide one Vector Search endpoint, one index per corpus
     source vs. one combined index with a `source_table` metadata column;
     defer embedding model/dimension choice to this step
-  - *Task:* ___
-  - *Expected output:* ___
-  - *Validation check:* ___
+  - *Task:* discovered Gold's models are all dbt views (`dbt_project.yml`),
+    but Vector Search's Delta Sync index requires a physical Delta table —
+    added a new `gold.genai` dbt block (`+materialized: table`, CDF
+    enabled) and two new source tables, `rag_support_ticket_corpus` /
+    `rag_review_corpus`, each with a `content` column (the sole
+    `embedding_source_column`) plus citation/filter metadata. Decided:
+    **two separate indexes**, not one combined index — ticket complaints
+    and merchant reviews are different content/query semantics, mixing
+    them risks retrieval cross-contamination; **one shared endpoint**
+    (compute infra, reusable across indexes); endpoint type
+    **Storage-Optimized** (7x cheaper, 300-500ms latency is fine for a
+    non-real-time support-assist chat on a Free Edition/demo-scale
+    dataset); embedding model **`databricks-gte-large-en`** (1024-dim,
+    8192-token window, Databricks-managed so no self-computed embeddings
+    to maintain); **no chunking** — every `content` row is a single short
+    paragraph, well under even a smaller model's context window, so
+    row-grain embedding is the whole document; sync mode **`TRIGGERED`**
+    (manual sync — static synthetic dataset, no streaming need, cheaper
+    than `CONTINUOUS`). Per [ADR-0009](adr/0009-agentic-integration-mcp-gated-review-then-act.md)'s
+    "start narrow": Step 6.3 builds only the support-ticket index first;
+    the review index is a second, separately-gated action after that one
+    is verified working. Confirmed read-only that the Vector Search API is
+    reachable on this workspace (`manage_vs_endpoint list` → `{"endpoints":
+    []}`, no capability error) — full availability only confirmed when
+    Step 6.3's actual `create` (a gated action) succeeds.
+  - *Expected output:* `src/dbt/models/gold/genai/rag_support_ticket_corpus.sql`,
+    `src/dbt/models/gold/genai/rag_review_corpus.sql`,
+    `src/dbt/models/gold/genai/_genai.yml`, `dbt_project.yml`'s new
+    `gold.genai` block
+  - *Validation check:* `dbt run --select rag_support_ticket_corpus
+    rag_review_corpus` — both built as physical `table` models (confirmed
+    from the run log, not just assumed); `dbt test` on the same selection
+    — 10/10 passed; `SHOW TBLPROPERTIES` on
+    `novalake.gold.rag_support_ticket_corpus` confirmed
+    `delta.enableChangeDataFeed = true` live
 - **Step 6.3 — Vector Search endpoint + index creation**
   - *Objective:* first live resource this module creates — start narrow
     per ADR-0009, one index end-to-end before anything else
@@ -283,3 +321,4 @@ guarantee.
 |------|--------|--------|
 | 2026-07-24 | Module scaffolded during `v0.6` scoping. RAG-before-text-to-SQL sequencing and the RAG-corpus/PII gaps named explicitly (§5); step-groups A/B laid out in §6. Build not started — this is the scoping-only artifact per `docs/adr/0009-*.md`. | Chirag + Claude |
 | 2026-07-24 | **Step 6.1 (RAG corpus decision) done**, first build step. Checked both data generators' source directly rather than assuming from field/schema names: `refund.reason` turned out to be a closed 5-value enum despite the name, `refund.notes`/`risk_alert.notes` are near-constant or drawn from tiny fixed pools, and ticket message-thread replies are also closed-set boilerplate beyond the first message. Narrowed the RAG corpus to `fct_support_tickets.description` + `fct_reviews.title`/`body` only — no new Gold model needed, both fields already flowed through Silver untouched, just widened the two existing fact tables and `_gold.yml`. PII policy decided: no masking needed, verified against generator source and confirmed live against the materialized Gold tables (8-row samples of each field, no PII found). `dbt run`/`dbt test` both green (27/27) on the widened models. Both decisions and the technical scope narrowing were confirmed with Chirag before implementation, given they deviated from §5's original tentative candidate list. | Chirag + Claude |
+| 2026-07-24 | **Step 6.2 (embedding + chunking strategy) done.** Discovered Gold's models are all dbt views, but Vector Search's Delta Sync needs a physical Delta table — added a `gold.genai` dbt block (`+materialized: table`, CDF enabled) and two new source tables, `rag_support_ticket_corpus`/`rag_review_corpus`. Decided: two separate indexes (not one combined index, to avoid mixing ticket-complaint and review-sentiment content in one embedding space) on one shared Storage-Optimized endpoint, `databricks-gte-large-en` managed embeddings, no chunking (single-paragraph rows), `TRIGGERED` sync. Confirmed read-only that the Vector Search API is reachable on this workspace. Both the index-shape and endpoint-type calls were confirmed with Chirag before implementation. `dbt run`/`dbt test` green (10/10) on the two new tables; `SHOW TBLPROPERTIES` confirmed CDF live. Per ADR-0009, Step 6.3 builds only the support-ticket index first — the review index is a separate, later gated action. | Chirag + Claude |

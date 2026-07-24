@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: rag_support_ticket_corpus
+    description: >
+      Physical Delta table (materialized='table', overriding Gold's
+      default view materialization -- see dbt_project.yml's gold.genai
+      block) sourced from fct_support_tickets, existing purely as a Vector
+      Search Delta Sync source. One row per ticket. content = description,
+      no chunking (single short paragraph per row). See docs/06-genai.md
+      Step 6.2.
+    columns:
+      - name: ticket_key
+        tests:
+          - unique
+          - not_null
+      - name: content
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null
+
+  - name: rag_review_corpus
+    description: >
+      Physical Delta table, same reasoning as rag_support_ticket_corpus,
+      sourced from fct_reviews. One row per review. content = title + '. '
+      + body concatenated, no chunking. See docs/06-genai.md Step 6.2.
+    columns:
+      - name: review_key
+        tests:
+          - unique
+          - not_null
+      - name: content
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null

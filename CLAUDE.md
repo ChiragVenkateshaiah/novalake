@@ -34,34 +34,15 @@ Don't duplicate phase status here — it goes stale fastest. Check
 
 ## Repo structure
 
-```
-novalake/
-├── README.md
-├── CONTRIBUTING.md
-├── CLAUDE.md               # this file
-├── databricks.yml          # Asset Bundle root — dev target only, no prod (see ADR-0007)
-├── resources/               # DAB resource definitions (jobs, dashboard, ...)
-├── src/
-│   ├── ingest.py            # PySpark: land + flatten the raw JSON (Bronze)
-│   └── dbt/                 # dbt project: Silver/Gold models + tests
-├── dbt_profiles/            # env_var()-based, local dbt dev only
-├── data/
-│   ├── generators/          # synthetic dataset generators (reproducible)
-│   └── dictionaries/        # what's in the data + the deliberate challenges
-├── notebooks/                # historical: hand-run exploratory notebooks
-├── docs/
-│   ├── checkpoint.md        # the one file with a different shape — see below
-│   ├── _skeleton.md          # reusable doc module template
-│   ├── adr/                 # one-decision-per-file architecture records
-│   └── 00-setup.md, ...      # one filled module per phase
-├── pipelines/                # Lakeflow Declarative Pipeline source (from v0.7)
-└── .github/workflows/        # CI (from v0.5, deploys via service principal)
-```
+Don't duplicate the tree here — same staleness risk as phase status, and it
+already drifted once. **`README.md`'s "Repo structure" section is the source
+of truth**, kept current as each phase adds files.
 
-`pipelines/` and any `v0.6` GenAI source directory (e.g. `src/genai/`,
-`resources/vector_search.yml`) are **not pre-scaffolded** — this project's
-standing principle is not to create a phase's structure ahead of the phase
-that needs it (see `docs/checkpoint.md`). Don't create them speculatively.
+One standing principle worth restating because it governs what *not* to
+create: `pipelines/` and any `v0.6` GenAI source directory (e.g.
+`src/genai/`, `resources/vector_search.yml`) are **not pre-scaffolded** —
+this project doesn't create a phase's structure ahead of the phase that
+needs it (see `docs/checkpoint.md`). Don't create them speculatively.
 
 ## Branch / commit / tag conventions
 

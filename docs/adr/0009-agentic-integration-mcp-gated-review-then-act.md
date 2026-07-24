@@ -6,7 +6,9 @@
 ADR is the formal record the checkpoint's revisit-log entry points to),
 [ADR-0006](0006-secret-based-service-principal-auth-for-cicd.md) (precedent
 for checking platform capability/cost directly rather than assuming, and for
-scoped, least-privilege identity access)
+scoped, least-privilege identity access), [ADR-0008](0008-novalake-terminus-and-cerberus-succession.md)
+(same "verify the platform before assuming" discipline, cited in Decision
+item 4)
 
 ## Context
 

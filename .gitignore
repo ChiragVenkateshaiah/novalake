@@ -24,6 +24,7 @@ Thumbs.db
 .mcp.json
 .mcp.json.bak
 .github/skills/
+.databricks-resources.json
 
 # Raw data artifacts (these live in the UC Volume, not in Git — see CONTRIBUTING.md)
 data/raw/

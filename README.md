@@ -128,17 +128,19 @@ rollups) on top of Silver, every fact's row count verified against its source
 Gold, both deployed, validated live, and wired into the DAB bundle
 (`resources/dashboard.yml`); see [`docs/04-serving.md`](docs/04-serving.md).
 
-🚧 `v0.5` CI/CD in progress — GitHub Actions (`bundle validate` PR gate,
-fail-safe `bundle deploy` on merge) automating the existing `dev` deploy via
-the `novalake-cicd` service principal (secret-based OAuth M2M — Free
-Edition doesn't expose OIDC federation, see
+✅ `v0.5` CI/CD complete and merged to `main` ([PR #5](https://github.com/ChiragVenkateshaiah/novalake/pull/5))
+— GitHub Actions (`bundle validate` PR gate, fail-safe `bundle deploy` on
+merge) automating the existing `dev` deploy via the `novalake-cicd`
+service principal (secret-based OAuth M2M — Free Edition doesn't expose
+OIDC federation, see
 [ADR-0006](docs/adr/0006-secret-based-service-principal-auth-for-cicd.md)).
 No `prod` target — real production semantics are out of scope for this
 single-workspace project; see
 [ADR-0007](docs/adr/0007-defer-prod-no-same-workspace-production-semantics.md)
 and [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md)
-(NovaLake's terminus at `v0.9`, succeeded by Cerberus). [PR #5](https://github.com/ChiragVenkateshaiah/novalake/pull/5)
-open — `bundle-validate.yml` is passing (caught and fixed a real
-unpinned-`root_path` bug on its first real run); `bundle-deploy.yml` has
-not run yet, pending a deliberate merge decision since it deploys to the
-live `dev` job/dashboard. See [`docs/05-cicd.md`](docs/05-cicd.md).
+(NovaLake's terminus at `v0.9`, succeeded by Cerberus).
+`bundle-validate.yml` caught and fixed a real unpinned-`root_path` bug on
+its first real run; `bundle-deploy.yml` ran for real on merge and
+succeeded, deploying to the existing `dev` job/dashboard in place (verified
+directly in the workspace UI, no parallel copies). See
+[`docs/05-cicd.md`](docs/05-cicd.md).

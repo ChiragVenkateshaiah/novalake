@@ -1,6 +1,6 @@
 # Module 5 · CI/CD
 
-`Status:` Draft  ·  `Owner:` Chirag  ·  `Last updated:` v0.5 (in progress)  ·  `Est. time:` ___
+`Status:` Complete  ·  `Owner:` Chirag  ·  `Last updated:` v0.5 (complete, 2026-07-24)  ·  `Est. time:` ___
 
 ## 1. Learning Objectives
 - [ ] Can evaluate whether a platform actually supports a stated best
@@ -201,16 +201,69 @@
       not Chirag's — see §6.2/Changelog); fixed by pinning `root_path`
       explicitly, second run confirmed the correct path resolves
       regardless of deploying identity
-- [ ] `bundle-deploy.yml` successfully deploys `dev` on merge to `main`,
+- [x] `bundle-deploy.yml` successfully deploys `dev` on merge to `main`,
       updating the existing job/dashboard in place (not creating parallel
-      copies) — confirms the least-privilege grants in §6.2 are sufficient
-- [ ] Sign-off: ___
+      copies) — confirms the least-privilege grants in §6.2 are sufficient.
+      Done 2026-07-24: PR #5 merged, `bundle-deploy.yml` ran in 41s and
+      succeeded, log confirmed it uploaded to
+      `/Workspace/Users/chiragvenkatesh92@gmail.com/.bundle/novalake/dev/files`
+      (Chirag's folder, not `novalake-cicd`'s own home). Chirag manually
+      verified in the workspace UI: exactly one `[dev] novalake
+      bronze-to-silver` job and one "NovaLake Gold Analytics" dashboard —
+      no parallel copies created.
+- [x] Sign-off: Chirag — 2026-07-24
 
 ## 10. Key Takeaways
-- ___
+- A green CI badge isn't proof of correctness — `bundle-validate.yml`'s
+  first real run passed while `root_path` was still silently resolving to
+  the wrong identity's home folder. The bug was only visible by reading
+  the run's actual log output, not its pass/fail status. Reading logs, not
+  just checking checkmarks, is what caught it.
+- Platform capabilities should be checked directly against the real
+  environment, not assumed from general best-practice knowledge. OIDC
+  federation is the better-practice CI auth pattern, but this Free Edition
+  workspace doesn't expose it (no Federation policies tab, no reachable
+  Account Console) — confirmed by opening the service principal's actual
+  detail page, not inferred from documentation elsewhere.
+- A same-workspace `prod` distinguished only by deploying identity is a
+  semantic overlay, not real environment isolation — recognized and
+  corrected (ADR-0007) before it shipped, not after.
+- A creation UI's default isn't automatically the right scope: `novalake
+  -cicd` was auto-added to `admins` on creation, which had to be
+  deliberately walked back to explicit least-privilege grants. Trusting a
+  wizard's default over verifying what it actually granted would have left
+  a much bigger blast radius than the job needed.
+- A shared target used by two different identities (a human locally, a
+  service principal in CI) can't hardcode either one's auth into the
+  bundle config — `workspace.profile` had to be dropped so both paths
+  resolve their own credentials independently.
 
 ## 11. Knowledge Check
-- Q1: ___
+- **Q1: Why doesn't `databricks.yml`'s `dev` target pin `workspace.profile`
+  anymore, and what would happen if it still did?**
+  `dev` is now deployed by two different identities: Chirag locally
+  (personal OAuth via a named CLI profile) and GitHub Actions
+  (`novalake-cicd`, authenticated purely via `DATABRICKS_HOST`/
+  `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` env vars, no CLI
+  profile at all). If `workspace.profile: DEFAULT` were still pinned, CI
+  would try to resolve a profile named `DEFAULT` from the runner's local
+  CLI config — which doesn't exist there — instead of falling back to its
+  env vars, and every CI run would fail on auth before ever reaching
+  `bundle validate`/`bundle deploy`.
+- **Q2: `bundle-validate.yml`'s first real run on PR #5 passed. Why didn't
+  that catch the `root_path` bug, and what did?**
+  `bundle validate` checks the bundle's schema and internal consistency —
+  it doesn't simulate a deploy or resolve identity-dependent defaults
+  against the live workspace the way `bundle deploy` does. `root_path` had
+  no explicit value, so it silently defaulted to whichever identity was
+  authenticated — `novalake-cicd`'s own home folder in CI, not Chirag's —
+  and that default is a legitimate value from `validate`'s point of view,
+  not an error. The bug was only caught by reading the actual CI log
+  output (which prints the resolved path) rather than trusting the
+  green checkmark alone; a `bundle-deploy` run would have created a brand
+  new job/dashboard under the wrong home folder instead of adopting the
+  existing ones, defeating the point of §6.2's scoped grants without ever
+  failing loudly.
 
 ## 12. References
 - Internal: `docs/checkpoint.md` (the `v0.5` re-open decision this module
@@ -231,3 +284,4 @@
 | 2026-07-22 | Module scaffolded. `v0.5` checkpoint re-open decision made (`docs/checkpoint.md`): Claude drafts every file, Chirag approves each one — landed after checking this workspace directly for OIDC support (not available) rather than assuming. `novalake-cicd` service principal + OAuth secret created by hand (Chirag); secret stored only as the GitHub repo secret `DATABRICKS_CLIENT_SECRET`, never seen by Claude. | Chirag + Claude |
 | 2026-07-22 | First-pass design (a `prod` target) reworked after Chirag caught that it was a same-workspace semantic overlay, not real environment isolation. Reworked to: CI/CD automates `dev` (taking over the existing job/dashboard, not a parallel copy); `novalake-cicd` removed from `admins` (auto-added by the creation UI, not deliberate) and granted explicit least-privilege access instead (job/dashboard/bundle-folder `CAN_MANAGE`, UC grants on bronze/silver/gold); `databricks.yml` drops its pinned `dev` profile so both personal and CI auth work against the same target. Produced [ADR-0007](adr/0007-defer-prod-no-same-workspace-production-semantics.md) (supersedes ADR-0003's `prod`-at-`v0.5` timing) and [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md) (NovaLake terminus at `v0.9`; real prod/promotion/infra-Spark-tuning deferred to a new project, Cerberus). Both ADRs reviewed by Opus (second-model-pass) before acceptance; corrections folded in (v0.8 marked reserved rather than silently skipped, an honest rejected-alternative for paid-classic-compute Databricks, a softened serverless-caching claim). `bundle validate -t dev` confirmed passing throughout | Chirag + Claude |
 | 2026-07-22 | PR #5 opened; `bundle-validate.yml` ran for real for the first time. First run passed but exposed a real bug only visible by reading the log, not just the pass/fail badge: with no explicit `root_path`, `dev` resolved to whichever identity was deploying's own home folder — `novalake-cicd`'s application-ID folder in CI, not Chirag's. Would have made `bundle-deploy` create a parallel job/dashboard instead of adopting the existing ones, silently defeating §6.2's grants. Fixed by pinning `root_path` explicitly in `databricks.yml`; second CI run confirmed the correct path for either identity. §9's first criterion checked off | Chirag + Claude |
+| 2026-07-24 | PR #5 reviewed and merged to `main` (merge commit, matching repo convention). `bundle-deploy.yml` triggered automatically on the merge push and succeeded in 41s; log confirmed it deployed to Chirag's existing bundle path, not `novalake-cicd`'s own home. Chirag manually verified in the workspace UI: exactly one `[dev] novalake bronze-to-silver` job and one "NovaLake Gold Analytics" dashboard, no parallel copies. §9's second criterion checked off, sign-off given, module marked Complete. | Chirag + Claude |

@@ -202,44 +202,60 @@ guarantee.
     — 10/10 passed; `SHOW TBLPROPERTIES` on
     `novalake.gold.rag_support_ticket_corpus` confirmed
     `delta.enableChangeDataFeed = true` live
-- **Step 6.3 — Vector Search endpoint + index creation** 🚧 support-ticket
-  index done 2026-07-24; review index deliberately not started yet
+- **Step 6.3 — Vector Search endpoint + index creation** ✅ done 2026-07-24
+  — both indexes live and validated
   - *Objective:* first live resource this module creates — start narrow
     per ADR-0009, one index end-to-end before anything else
   - *Task:* MCP-gated actions per ADR-0009/`CLAUDE.md` — full parameter set
-    presented and approved before creation. Executed: `manage_vs_endpoint
-    (create_or_update, name="novalake-rag", endpoint_type=
-    "STORAGE_OPTIMIZED")` → `ONLINE` immediately (this doubled as the Free
-    Edition availability check — creation succeeding, not a prior
-    assumption, is what confirmed Vector Search is available here);
-    `manage_vs_index(create_or_update, name=
+    presented and approved before creation, for each of the three actions
+    below. (1) `manage_vs_endpoint(create_or_update, name="novalake-rag",
+    endpoint_type="STORAGE_OPTIMIZED")` → `ONLINE` immediately (this
+    doubled as the Free Edition availability check — creation succeeding,
+    not a prior assumption, is what confirmed Vector Search is available
+    here). (2) `manage_vs_index(create_or_update, name=
     "novalake.gold.rag_support_ticket_index", endpoint_name="novalake-rag",
     primary_key="ticket_key", index_type="DELTA_SYNC", delta_sync_index_spec
     ={source_table: rag_support_ticket_corpus, embedding_source_columns:
     [{content, databricks-gte-large-en}], pipeline_type: TRIGGERED,
     columns_to_sync: [ticket_key, content, subject, priority, channel,
-    source, event_date, customer_id]})`. Initial sync ran unusually long
+    source, event_date, customer_id]})` — initial sync ran unusually long
     (stuck reporting "Provisioning pipeline compute..." well past a normal
-    cold-start) — diagnosed live (Jobs & Pipelines showed nothing, since
+    cold-start), diagnosed live (Jobs & Pipelines showed nothing, since
     Vector Search sync runs on internal managed compute not a visible
-    workspace job) rather than assumed broken; resolved after a UI reload,
-    which points to a status-refresh lag rather than a genuine multi-minute
-    hang, though the exact cause was never confirmed. Full trail logged in
-    `docs/checkpoint.md`'s 2026-07-24 audit entry per ADR-0009 §3.
+    workspace job) rather than assumed broken; resolved after a UI reload.
+    (3) Same pattern for `manage_vs_index(create_or_update, name=
+    "novalake.gold.rag_review_index", endpoint_name="novalake-rag",
+    primary_key="review_key", index_type="DELTA_SYNC", delta_sync_index_spec
+    ={source_table: rag_review_corpus, embedding_source_columns:
+    [{content, databricks-gte-large-en}], pipeline_type: TRIGGERED,
+    columns_to_sync: [review_key, content, title, body, rating, source,
+    event_date, customer_id, merchant_id]})` — reused the existing endpoint
+    (no second endpoint needed); the slow-initial-sync pattern recurred but
+    this time resolved on its own via CLI polling with no UI reload,
+    weakening the "reload fixed it" theory — more likely both cases were
+    genuinely slow first-sync provisioning that the status API under-reports
+    until well underway, not something reload-dependent. Full action-by-
+    action trail logged in `docs/checkpoint.md`'s 2026-07-24 audit entries
+    per ADR-0009 §3.
   - *Expected output:* `resources/vector_search.yml` if DAB supports the
     resource type (check via `databricks-bundles` skill — **not yet
-    checked**; this index was created via MCP directly, not through the
+    checked**; both indexes were created via MCP directly, not through the
     bundle, so the DAB-support question from ADR-0009's Consequences is
-    still open), or a documented MCP-created resource if not — currently
-    the latter, undocumented as bundle IaC
+    still open, worth resolving before Step 6.4 if the answer changes how
+    the RAG agent should reference these indexes), or a documented
+    MCP-created resource if not — currently the latter, undocumented as
+    bundle IaC
   - *Validation check:* `databricks vector-search-indexes get-index` (CLI,
-    read-only) confirmed `"ready": true, "indexed_row_count": 1255"` —
-    matches `rag_support_ticket_corpus`'s row count exactly, so every
-    ticket got embedded. `query_vs_index` (read-only) with a test query
-    ("customer says a refund was approved but the money never arrived")
-    returned 3 semantically on-target "Refund not received" tickets,
-    similarity scores ~0.66 — retrieval verified working, not just "index
-    exists." Review index intentionally not built yet.
+    read-only) confirmed both indexes `"ready": true` with
+    `indexed_row_count` matching their source tables exactly (tickets:
+    1255/1255; reviews: 1034/1034) — every row got embedded, not a partial
+    sync. `query_vs_index` (read-only) with real test queries against both:
+    tickets ("customer says a refund was approved but the money never
+    arrived") returned 3 semantically on-target "Refund not received"
+    results, scores ~0.66; reviews ("customer had trouble with payments
+    failing while traveling abroad") returned 3 on-target "Saved me during
+    travel" results, scores ~0.62 — retrieval verified working on both
+    indexes, not just "index exists."
 - **Step 6.4 — RAG agent**
   - *Objective:* retrieval + generation, likely an Agent Bricks Knowledge
     Assistant
@@ -351,3 +367,4 @@ guarantee.
 | 2026-07-24 | **Step 6.1 (RAG corpus decision) done**, first build step. Checked both data generators' source directly rather than assuming from field/schema names: `refund.reason` turned out to be a closed 5-value enum despite the name, `refund.notes`/`risk_alert.notes` are near-constant or drawn from tiny fixed pools, and ticket message-thread replies are also closed-set boilerplate beyond the first message. Narrowed the RAG corpus to `fct_support_tickets.description` + `fct_reviews.title`/`body` only — no new Gold model needed, both fields already flowed through Silver untouched, just widened the two existing fact tables and `_gold.yml`. PII policy decided: no masking needed, verified against generator source and confirmed live against the materialized Gold tables (8-row samples of each field, no PII found). `dbt run`/`dbt test` both green (27/27) on the widened models. Both decisions and the technical scope narrowing were confirmed with Chirag before implementation, given they deviated from §5's original tentative candidate list. | Chirag + Claude |
 | 2026-07-24 | **Step 6.2 (embedding + chunking strategy) done.** Discovered Gold's models are all dbt views, but Vector Search's Delta Sync needs a physical Delta table — added a `gold.genai` dbt block (`+materialized: table`, CDF enabled) and two new source tables, `rag_support_ticket_corpus`/`rag_review_corpus`. Decided: two separate indexes (not one combined index, to avoid mixing ticket-complaint and review-sentiment content in one embedding space) on one shared Storage-Optimized endpoint, `databricks-gte-large-en` managed embeddings, no chunking (single-paragraph rows), `TRIGGERED` sync. Confirmed read-only that the Vector Search API is reachable on this workspace. Both the index-shape and endpoint-type calls were confirmed with Chirag before implementation. `dbt run`/`dbt test` green (10/10) on the two new tables; `SHOW TBLPROPERTIES` confirmed CDF live. Per ADR-0009, Step 6.3 builds only the support-ticket index first — the review index is a separate, later gated action. | Chirag + Claude |
 | 2026-07-24 | **Step 6.3 (support-ticket index) done — first gated MCP actions executed under ADR-0009.** Presented the exact tool calls and full parameter set, got Chirag's explicit go-ahead, then created the `novalake-rag` endpoint (`STORAGE_OPTIMIZED`, `ONLINE` immediately — this doubled as the Free Edition availability check ADR-0009's Consequences called for) and `novalake.gold.rag_support_ticket_index` (`DELTA_SYNC`, `TRIGGERED`). Initial sync ran unusually long with no error, stuck reporting "Provisioning pipeline compute..."; diagnosed live (checked Jobs & Pipelines, found nothing — inconclusive, not evidence of failure, since Vector Search sync runs on internal managed compute) rather than assumed broken. Resolved after Chirag reloaded the Databricks UI; confirmed independently via CLI (`"ready": true, "indexed_row_count": 1255"`, matching the source table exactly). Retrieval verified with a real test query — 3 semantically on-target results, not just "index exists." Full action-by-action audit trail logged to `docs/checkpoint.md` per ADR-0009 §3. Review index deliberately not built yet, per ADR-0009's "start narrow." | Chirag + Claude |
+| 2026-07-24 | **Step 6.3 completed — review index created.** Same gate discipline as the ticket index: exact parameters presented, explicit go-ahead, `manage_vs_index` on the existing `novalake-rag` endpoint (no second endpoint needed). Same slow-initial-sync pattern recurred, but this time resolved on its own via CLI polling with no UI reload — weakens the earlier "reload fixed it" theory; more likely both were just genuinely slow first-sync provisioning the status API under-reports, not reload-dependent. `indexed_row_count: 1034` matched the source table exactly; retrieval verified with a real query, 3 on-target "Saved me during travel" results. Both v0.6a indexes (tickets, reviews) are now live and validated end-to-end. Open item carried forward: whether DAB supports a Vector Search resource type at all (ADR-0009's Consequences) still hasn't been checked — both indexes exist only as MCP-created resources, not bundle IaC. | Chirag + Claude |

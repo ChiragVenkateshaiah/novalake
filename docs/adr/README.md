@@ -18,8 +18,11 @@ carries the narrative and links here for the formal record.
 See that file for the full discussion. ADRs 0006–0008 came from `v0.5`
 (CI/CD) — the checkpoint's explicit re-open point for agent-authored IaC —
 after checking this workspace's actual auth capabilities directly rather
-than assuming. 0007–0008 also went through a second-model-pass review
-before being accepted, same discipline as 0001–0005.
+than assuming. ADR-0009 came from `v0.6` scoping — the checkpoint's next
+re-open point, for the actual agentic-integration architecture. 0007–0009
+each went through a second-model-pass review before being accepted, same
+discipline as 0001–0005 (0009's review covered both the scoping plan that
+proposed it and the drafted ADR file itself).
 
 ## Index
 
@@ -33,3 +36,4 @@ before being accepted, same discipline as 0001–0005.
 | [0006](0006-secret-based-service-principal-auth-for-cicd.md) | Secret-based service-principal auth for CI/CD, not OIDC federation | Accepted |
 | [0007](0007-defer-prod-no-same-workspace-production-semantics.md) | Defer `prod` — no same-workspace production semantics | Accepted |
 | [0008](0008-novalake-terminus-and-cerberus-succession.md) | NovaLake terminus at `v0.9`; production semantics and Terraform IaC succeed to Cerberus | Accepted |
+| [0009](0009-agentic-integration-mcp-gated-review-then-act.md) | Agentic integration for `v0.6`+ — MCP-gated, review-then-act | Accepted |

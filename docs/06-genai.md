@@ -237,14 +237,22 @@ guarantee.
     until well underway, not something reload-dependent. Full action-by-
     action trail logged in `docs/checkpoint.md`'s 2026-07-24 audit entries
     per ADR-0009 §3.
-  - *Expected output:* `resources/vector_search.yml` if DAB supports the
-    resource type (check via `databricks-bundles` skill — **not yet
-    checked**; both indexes were created via MCP directly, not through the
-    bundle, so the DAB-support question from ADR-0009's Consequences is
-    still open, worth resolving before Step 6.4 if the answer changes how
-    the RAG agent should reference these indexes), or a documented
-    MCP-created resource if not — currently the latter, undocumented as
-    bundle IaC
+  - *Expected output:* `resources/vector_search.yml` — **done 2026-07-26.**
+    `databricks bundle schema` confirmed `resources.vector_search_endpoints`/
+    `resources.vector_search_indexes` are real DAB resource types (CLI
+    v1.7.0), resolving ADR-0009's Consequences open item. No `bundle
+    generate` support exists for this resource type, so the file was
+    authored by hand, field-matched against live `get-index`/`get-endpoint`
+    output, then adopted via `databricks bundle deployment bind` (endpoint
+    bound clean; both indexes initially planned a destructive `recreate`
+    over `columns_to_sync` going `null`→explicit — this field is write-only
+    and never echoed back by `GetIndex` — fixed by omitting it, since the
+    corpus tables' full column sets already equal what it would have named,
+    making "blank = sync all" identical in effect) and reconciled via
+    `bundle deploy`. Live state verified unchanged post-deploy
+    (`creation_timestamp`, `indexed_row_count` for both indexes, `ONLINE`
+    endpoint state — all intact). Full trail: `docs/checkpoint.md`'s
+    2026-07-26 entry.
   - *Validation check:* `databricks vector-search-indexes get-index` (CLI,
     read-only) confirmed both indexes `"ready": true` with
     `indexed_row_count` matching their source tables exactly (tickets:
@@ -257,8 +265,19 @@ guarantee.
     travel" results, scores ~0.62 — retrieval verified working on both
     indexes, not just "index exists."
 - **Step 6.4 — RAG agent**
-  - *Objective:* retrieval + generation, likely an Agent Bricks Knowledge
-    Assistant
+  - *Objective:* retrieval + generation. **Design decided 2026-07-26:** a
+    custom MLflow `ChatAgent`/`ResponsesAgent`, not Agent Bricks Knowledge
+    Assistant. Checked `manage_ka` directly — it only ingests files from a
+    UC Volume via its own internal indexing pipeline and cannot be pointed
+    at an externally-built Vector Search index, so a KA would have orphaned
+    `rag_support_ticket_index`/`rag_review_index` (Step 6.3) rather than use
+    them. The custom agent instead calls `query_vs_index` against both
+    existing indexes for retrieval and a Databricks Foundation Model API
+    endpoint for generation, logged as an MLflow model and deployed to
+    Databricks Model Serving — still 100% Databricks-native (Vector Search,
+    Foundation Model APIs, Model Serving, Unity Catalog governance), and
+    representable in DAB (`resources.model_serving_endpoints`) unlike a KA
+    tile. Confirmed with Chirag before proceeding.
   - *Task:* ___
   - *Expected output:* ___
   - *Validation check:* ___
@@ -368,3 +387,4 @@ guarantee.
 | 2026-07-24 | **Step 6.2 (embedding + chunking strategy) done.** Discovered Gold's models are all dbt views, but Vector Search's Delta Sync needs a physical Delta table — added a `gold.genai` dbt block (`+materialized: table`, CDF enabled) and two new source tables, `rag_support_ticket_corpus`/`rag_review_corpus`. Decided: two separate indexes (not one combined index, to avoid mixing ticket-complaint and review-sentiment content in one embedding space) on one shared Storage-Optimized endpoint, `databricks-gte-large-en` managed embeddings, no chunking (single-paragraph rows), `TRIGGERED` sync. Confirmed read-only that the Vector Search API is reachable on this workspace. Both the index-shape and endpoint-type calls were confirmed with Chirag before implementation. `dbt run`/`dbt test` green (10/10) on the two new tables; `SHOW TBLPROPERTIES` confirmed CDF live. Per ADR-0009, Step 6.3 builds only the support-ticket index first — the review index is a separate, later gated action. | Chirag + Claude |
 | 2026-07-24 | **Step 6.3 (support-ticket index) done — first gated MCP actions executed under ADR-0009.** Presented the exact tool calls and full parameter set, got Chirag's explicit go-ahead, then created the `novalake-rag` endpoint (`STORAGE_OPTIMIZED`, `ONLINE` immediately — this doubled as the Free Edition availability check ADR-0009's Consequences called for) and `novalake.gold.rag_support_ticket_index` (`DELTA_SYNC`, `TRIGGERED`). Initial sync ran unusually long with no error, stuck reporting "Provisioning pipeline compute..."; diagnosed live (checked Jobs & Pipelines, found nothing — inconclusive, not evidence of failure, since Vector Search sync runs on internal managed compute) rather than assumed broken. Resolved after Chirag reloaded the Databricks UI; confirmed independently via CLI (`"ready": true, "indexed_row_count": 1255"`, matching the source table exactly). Retrieval verified with a real test query — 3 semantically on-target results, not just "index exists." Full action-by-action audit trail logged to `docs/checkpoint.md` per ADR-0009 §3. Review index deliberately not built yet, per ADR-0009's "start narrow." | Chirag + Claude |
 | 2026-07-24 | **Step 6.3 completed — review index created.** Same gate discipline as the ticket index: exact parameters presented, explicit go-ahead, `manage_vs_index` on the existing `novalake-rag` endpoint (no second endpoint needed). Same slow-initial-sync pattern recurred, but this time resolved on its own via CLI polling with no UI reload — weakens the earlier "reload fixed it" theory; more likely both were just genuinely slow first-sync provisioning the status API under-reports, not reload-dependent. `indexed_row_count: 1034` matched the source table exactly; retrieval verified with a real query, 3 on-target "Saved me during travel" results. Both v0.6a indexes (tickets, reviews) are now live and validated end-to-end. Open item carried forward: whether DAB supports a Vector Search resource type at all (ADR-0009's Consequences) still hasn't been checked — both indexes exist only as MCP-created resources, not bundle IaC. | Chirag + Claude |
+| 2026-07-26 | **DAB-support open item resolved; Step 6.3's resources retrofitted to bundle IaC; Step 6.4 design decided.** `databricks bundle schema` confirmed Vector Search endpoints/indexes are real DAB resource types (CLI v1.7.0) — `resources/vector_search.yml` authored by hand (no `bundle generate` support for this type), adopted via `bundle deployment bind`, reconciled via `bundle deploy`. A first bind attempt would have force-recreated both indexes (`columns_to_sync` null→explicit diff); fixed by omitting the field once the corpus tables' full column sets were confirmed to already equal it. Live state verified unchanged after deploy. Separately, checked Agent Bricks Knowledge Assistant in detail for Step 6.4 and found it can't consume an externally-built Vector Search index (Volume-of-files ingestion only) — decided with Chirag on a custom MLflow `ChatAgent` on Databricks Model Serving instead, querying the two existing indexes directly, so Steps 6.2–6.3's work isn't orphaned. Full technical trail (bind/deploy commands, the process gap where `bundle deploy` applied without a plan/confirmation prompt unlike `bind`, and the live-state verification that followed) logged in `docs/checkpoint.md`'s 2026-07-26 entry. | Chirag + Claude |

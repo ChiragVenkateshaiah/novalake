@@ -95,6 +95,22 @@ reviewed by Opus):
 (Full SQL text lives in the catalog file — not duplicated here, to keep one
 source of truth per Step 6.1.)
 
+**Caveat added `v0.6` Step 6.8, not known at `v0.4`:** "pin the SQL" above
+overstates the actual guarantee. Testing directly against this space via
+`ask_genie` (bypassing any wrapping layer) found that the *same* certified
+question, asked in separate conversations, does not reliably reuse the
+pinned SQL — one attempt at the risk-flagged-rate question free-generated
+an ungrouped query differing from the certified grouped-by-source SQL and
+this doc's own guardrail intent, while a second attempt at the identical
+question correctly reused the certified query. Certified examples appear to
+bias, not deterministically pin, the underlying SQL-generation LLM. A
+single passing validation run (this doc's original "3 live tests, all
+passed" below) is evidence the pinning *can* work, not proof it reliably
+*does* — full technical trail in `docs/06-genai.md` Step 6.8 and
+`docs/checkpoint.md`'s 2026-07-26 entry. No fix available from the
+consuming side; treat this as a standing limitation to monitor (e.g. via
+periodic re-validation of the certified pairs), not a one-time-fixable bug.
+
 ## Sample questions (shown in the Genie UI)
 
 Broader set, covering domains without a certified pair too — drawn from
@@ -143,3 +159,4 @@ Broader set, covering domains without a certified pair too — drawn from
 |------|--------|--------|
 | 2026-07-21 | Initial Genie space spec drafted from `docs/serving/question_catalog.md`, using the `databricks-genie` skill's `serialized_space`/`table_identifiers`/`example_question_sqls` model to shape the artifact | Chirag + Claude |
 | 2026-07-21 | Deployed by hand (Chirag, guided step by step by Claude — no MCP write calls). All checklist items done; 3 guardrail tests passed live. Details in `docs/04-serving.md`'s changelog | Chirag + Claude |
+| 2026-07-26 | **Caveat added to the "Certified example question → SQL pairs" section** — `v0.6` Step 6.8's offline eval found certified-SQL reuse is not deterministic (same question, separate conversations, one attempt free-generated a different query than the pinned one). See the caveat inline above and `docs/06-genai.md` Step 6.8 for the full trail. Not a regression in this space's config — a previously-unknown property of how certified examples actually work. | Chirag + Claude |

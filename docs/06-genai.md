@@ -505,9 +505,57 @@ guarantee.
   - *Objective:* reuse `question_catalog.md`'s 6 certified question→SQL
     pairs directly as a starting set, extended with new text-to-SQL-specific
     cases, scored on execution/result correctness
-  - *Task:* ___
-  - *Expected output:* ___
-  - *Validation check:* ___
+  - *Task:* Executed all 6 certified queries plus 2 new extension cases
+    directly via `execute_sql` (read-only, ungated) to get ground truth by
+    execution, not a guess — `src/genai/sql_eval_dataset.py`'s
+    `expected_facts` are these real computed values. The MAS isn't a
+    locally importable object like Step 6.5's agent, so
+    `src/genai/eval_mas.py` queries the deployed `mas-1b6eda83-endpoint`
+    directly (the documented exception to "test locally first" — production
+    quality tracking of a surface with no local equivalent), scored with
+    `Safety`/`Correctness`. Used the exact catalog phrasing, not
+    `genie_space.md`'s relative "last quarter" sample-question wording,
+    since the latter drifts with today's date and wouldn't give a fixed,
+    checkable answer.
+  - *Expected output:* An MLflow eval run scoring the deployed text-to-SQL
+    surface against 8 execution-grounded questions.
+  - *Validation check:* First run reported `safety/mean`/`correctness/mean`
+    as empty `{}` — both scorers failed with `ModuleNotFoundError:
+    databricks.agents`, a dependency I'd omitted from this job's environment
+    (Step 6.5's job included it, this new job didn't) — fixed and re-ran.
+    **While investigating the empty-metrics run's raw responses (before the
+    fix was confirmed), found something more significant than the dependency
+    bug:** two questions' returned numbers didn't match the precomputed
+    ground truth. Verified directly against the Genie space itself via
+    `ask_genie` (bypassing the MAS entirely) rather than guessing at the
+    cause: the certified "approval rate in Q1 2026" question, asked
+    literally, correctly reused the certified SQL and returned the exact
+    combined figure (0.7400) — proving MAS's query-rewriting (it paraphrases
+    the user's question before invoking the Genie tool; observed directly in
+    the tool-call trace) is what broke certified-question matching for that
+    case, not the Genie space itself. But the risk-flagged-rate question,
+    asked directly to Genie with the exact certified wording, *also* didn't
+    reuse the certified grouped-by-source SQL — it free-generated an
+    ungrouped single-figure query instead, differing from both the catalog's
+    pinned SQL and my ground truth. Re-ran the full eval fresh after fixing
+    the dependency: this time **both** questions correctly reused the
+    certified SQL and matched ground truth exactly (confirmed via a targeted
+    trace inspection, not just trusting the 100% aggregate) — the same
+    question, in a separate conversation, went from wrong to right with no
+    code change in between. **This is the real finding of Step 6.8, more
+    important than the eval mechanics themselves: certified-example SQL
+    reuse in Genie is not deterministic.** The same literal question can
+    reuse the pinned, guardrail-compliant SQL on one attempt and
+    free-generate a different query on another — which means a single
+    passing validation run (like `docs/serving/genie_space.md`'s original
+    "3 live tests, all passed" `v0.4` validation) is not proof the certified
+    pinning holds reliably going forward. Documented as a known limitation
+    here and in `docs/serving/genie_space.md` rather than treated as fixed —
+    there's no code-level fix available for this from the consuming side;
+    it's inherent to how certified examples bias, rather than deterministically
+    pin, the underlying SQL-generation LLM. Final clean eval run (fresh,
+    fixed dependencies): `safety/mean`=100%, `correctness/mean`=100% across
+    all 8 questions.
 - **Step 6.9 — Serving surface + access control**
   - *Objective:* ___
   - *Task:* ___

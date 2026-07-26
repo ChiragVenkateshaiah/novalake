@@ -1,8 +1,8 @@
 # Module 6 · GenAI
 
-`Status:` Step-group A (RAG, §6.1–6.6) complete; Step-group B (text-to-SQL,
-§6.7–6.9) not started  ·  `Owner:` Chirag  ·
-`Last updated:` v0.6 (Step-group A complete, 2026-07-26)  ·  `Est. time:` ___
+`Status:` Complete — Step-group A (RAG, §6.1–6.6) and Step-group B
+(text-to-SQL, §6.7–6.9) both done  ·  `Owner:` Chirag  ·
+`Last updated:` v0.6 (module complete, 2026-07-26)  ·  `Est. time:` ___
 
 **Sequencing decision (recorded here, not in a separate ADR — this is a
 scope/sequencing call for this one module, not standing architecture):** RAG
@@ -557,10 +557,29 @@ guarantee.
     fixed dependencies): `safety/mean`=100%, `correctness/mean`=100% across
     all 8 questions.
 - **Step 6.9 — Serving surface + access control**
-  - *Objective:* ___
-  - *Task:* ___
-  - *Expected output:* ___
-  - *Validation check:* ___
+  - *Objective:* mirror Step 6.6's pattern for the text-to-SQL surface —
+    confirm (not assume) access is correctly scoped, and document it as a
+    reviewable serving-surface spec, prominently carrying forward Step
+    6.8's non-determinism finding as a standing limitation rather than
+    letting it stay buried in a changelog entry.
+  - *Task:* Checked live endpoint permissions
+    (`serving-endpoints get-permissions` on `mas-1b6eda83-endpoint`)
+    directly. Wrote `docs/serving/sql_agent.md`: purpose, the guardrails
+    inherited from wrapping the Genie space (not re-declared), and —
+    prominently, not buried — Step 6.8's two real findings (non-
+    deterministic certified-SQL reuse; MAS's own question-rewriting) as
+    standing limitations with a practical implication for consumers
+    ("re-verify via `execute_sql` directly if the stakes are high").
+  - *Expected output:* `docs/serving/sql_agent.md`, confirming current live
+    state (owner/admin-only access, zero broader grant on the MAS
+    endpoint).
+  - *Validation check:* `CAN_MANAGE` for Chirag (explicit) and `admins`
+    (explicit + inherited) only — no `CAN_QUERY`-to-everyone or similar
+    broad grant present, matching every other surface in this project. No
+    Genie-space-specific CLI permissions command exists (checked
+    `databricks genie --help`) — the underlying space's access control was
+    already established at `v0.4` and is unchanged by this wrapping layer,
+    so nothing new to audit there.
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: `manage_jobs(create)` is idempotent (returns
@@ -625,18 +644,56 @@ guarantee.
       agent deployed to `novalake-support-assist` (v2, 100% traffic),
       queried live with grounded/cited answers; offline eval found and the
       fix confirmed via regression re-run (`no_prompt_leak`=100%)
-- [ ] Text-to-SQL surface live, inheriting Genie's guardrails, correctness
-      eval passing (§6.8) — Step-group B, not started
-- [x] Sign-off (Step-group A only, per §6's rollback-marker decision):
-      Chirag confirmed each gated action live via explicit go-ahead
-      (Steps 6.3–6.6, logged in `docs/checkpoint.md`); full-module sign-off
-      still pending Step-group B
+- [x] Text-to-SQL surface live, inheriting Genie's guardrails, correctness
+      eval passing (§6.8) — MAS wraps the existing Genie space (no
+      guardrails re-declared); offline eval `safety`/`correctness` both
+      100% on a clean run, but with an important caveat: Step 6.8 found
+      certified-SQL reuse is non-deterministic, documented as a standing
+      limitation in `docs/serving/sql_agent.md` and
+      `docs/serving/genie_space.md`, not silently passed over because the
+      final aggregate looked clean
+- [x] Sign-off: Chirag confirmed each gated action live via explicit
+      go-ahead across all of Step-group A (6.3–6.6) and Step-group B
+      (6.7–6.9), every action logged in `docs/checkpoint.md`. Full `v0.6`
+      module complete.
 
 ## 10. Key Takeaways
-- ___
+- Manually auditing raw judge rationale (not just trusting aggregate eval
+  percentages) is what actually caught the real problems this module found
+  — a prompt-injection leak (Step 6.5) and non-deterministic certified-SQL
+  reuse (Step 6.8). Both would have passed silently on a percentage-only
+  read; both were confirmed by reading actual transcripts/traces and, for
+  6.8, cross-checking directly against the underlying resource
+  (`ask_genie`) rather than trusting the layer on top of it.
+- A capability existing (`resources.model_serving_endpoints` in DAB) doesn't
+  mean it's the right fit — `agents.deploy()` provisions more than that
+  resource type captures (Review App, feedback model, inference tables), so
+  staying script-based for deploy/teardown was the correct call even though
+  IaC was technically available, unlike Step 6.3's Vector Search retrofit
+  where IaC was a clean fit.
+- Platform constraints and my own bugs look identical from the outside
+  (an error message) but need different responses: `execute_code`'s
+  unsupported REPL channel and Agent Bricks examples' disabled embedding
+  model were genuine platform limits, not fixable by retrying — while
+  `scale_to_zero_enabled` vs. `scale_to_zero` and a missing
+  `mlflow.set_experiment()` call were my own bugs, fixable and fixed.
+  Conflating the two either wastes time re-litigating a platform limit or
+  gives up too early on a real fix.
 
 ## 11. Knowledge Check
-- Q1: ___
+- Q1: Why does `RetrievalGroundedness`'s aggregate score legitimately
+  differ between the two eval lists in Step 6.5 (67% grounded / 0%
+  behavior), and why is that not itself a bug? — Because the behavior-set
+  questions are refusal/guardrail probes where the correct response often
+  makes *no* tool call at all (e.g. the weather question); with no
+  retriever span in the trace, there's nothing for the scorer to ground
+  against, so 0% there reflects correct refusal behavior, not failure.
+- Q2: Why can't Step 6.8's "100% correctness on the final run" be reported
+  as "the text-to-SQL surface is reliable," full stop? — Because the same
+  literal questions produced a different (non-certified) SQL and a
+  different number on an earlier run with no code change in between;
+  correctness on any single run is a sample of a non-deterministic
+  process, not a property of the surface.
 
 ## 12. References
 - Internal: `docs/checkpoint.md` (the `v0.6` re-open decision this module
@@ -661,3 +718,4 @@ guarantee.
 | 2026-07-24 | **Step 6.3 completed — review index created.** Same gate discipline as the ticket index: exact parameters presented, explicit go-ahead, `manage_vs_index` on the existing `novalake-rag` endpoint (no second endpoint needed). Same slow-initial-sync pattern recurred, but this time resolved on its own via CLI polling with no UI reload — weakens the earlier "reload fixed it" theory; more likely both were just genuinely slow first-sync provisioning the status API under-reports, not reload-dependent. `indexed_row_count: 1034` matched the source table exactly; retrieval verified with a real query, 3 on-target "Saved me during travel" results. Both v0.6a indexes (tickets, reviews) are now live and validated end-to-end. Open item carried forward: whether DAB supports a Vector Search resource type at all (ADR-0009's Consequences) still hasn't been checked — both indexes exist only as MCP-created resources, not bundle IaC. | Chirag + Claude |
 | 2026-07-26 | **DAB-support open item resolved; Step 6.3's resources retrofitted to bundle IaC; Step 6.4 design decided.** `databricks bundle schema` confirmed Vector Search endpoints/indexes are real DAB resource types (CLI v1.7.0) — `resources/vector_search.yml` authored by hand (no `bundle generate` support for this type), adopted via `bundle deployment bind`, reconciled via `bundle deploy`. A first bind attempt would have force-recreated both indexes (`columns_to_sync` null→explicit diff); fixed by omitting the field once the corpus tables' full column sets were confirmed to already equal it. Live state verified unchanged after deploy. Separately, checked Agent Bricks Knowledge Assistant in detail for Step 6.4 and found it can't consume an externally-built Vector Search index (Volume-of-files ingestion only) — decided with Chirag on a custom MLflow `ChatAgent` on Databricks Model Serving instead, querying the two existing indexes directly, so Steps 6.2–6.3's work isn't orphaned. Full technical trail (bind/deploy commands, the process gap where `bundle deploy` applied without a plan/confirmation prompt unlike `bind`, and the live-state verification that followed) logged in `docs/checkpoint.md`'s 2026-07-26 entry. | Chirag + Claude |
 | 2026-07-26 | **Step-group A complete — Steps 6.4, 6.5, 6.6 all done same day.** Step 6.4: built a LangGraph `ResponsesAgent` (`src/genai/agent.py`) with two separate `VectorSearchRetrieverTool`s so tickets/reviews can never be blended even before the prompt is applied; logged to UC (`novalake.genai.support_assist_agent`) and deployed to Model Serving (`novalake-support-assist`, `scale_to_zero=True` — required on this Free Edition workspace, not optional). `execute_code` proved unusable on this workspace this session (unsupported REPL channel, a real MCP-tool-side bug in the documented workaround, no cluster available) — every execution step pivoted to ad-hoc jobs instead, the same pattern `resources/dbt_job.yml` already used. Step 6.5: built a two-list offline eval (`src/genai/eval_dataset.py`/`eval_agent.py`) and, critically, manually audited the raw judge rationale rather than trusting aggregate percentages — this caught a real prompt-injection vulnerability (the agent leaked its full system prompt when told to "ignore your instructions"), fixed with an explicit anti-leak rule and a permanent regression scorer, then redeployed as UC model version 2 the same day so the live endpoint was never left serving the known-vulnerable prompt. The audit also caught two scorer-design problems that looked like agent failures but weren't (a conditional Guidelines judge misapplied to rows where its premise didn't hold; a false-negative on the source-blending guardrail) — both documented rather than silently accepted or silently "fixed" by relaxing the check. Step 6.6: confirmed (not assumed) that live UC grants and endpoint permissions were already minimally scoped, and wrote `docs/serving/support_assist_agent.md` as the reviewable serving-surface spec, mirroring `genie_space.md`'s pattern. Full gated-action trail for all three steps logged in `docs/checkpoint.md`. §1/§7/§8/§9 filled in for Step-group A's actual scope, not left as headers, ahead of the `v0.6.0-rag` tag. | Chirag + Claude |
+| 2026-07-26 | **Step-group B complete — full `v0.6` module done.** Step 6.7: decided to wrap the existing "NovaLake Gold Analytics" Genie space in an Agent Bricks Supervisor Agent (`NovaLake Analytics Assistant`) rather than re-declare a from-scratch text-to-SQL agent, so every guardrail already curated into the space is inherited, not re-derived. Verified live: a certified question correctly routed and returned the real computed value; an out-of-scope free-text probe was correctly declined. Agent Bricks "examples" couldn't be created (`MODEL_DISABLED` — a genuine Free Edition platform constraint, confirmed via direct CLI, not an MCP-tool bug); proceeded without them per Chirag's call, since routing/guardrail behavior was already proven from `instructions` alone. Step 6.8: built an execution-grounded offline eval (ground truth computed via `execute_sql` for 6 certified + 2 new questions) and found the module's other major real result — certified-example SQL reuse in Genie is **non-deterministic**: the same literal question, asked in separate conversations, reused the pinned guardrail-compliant SQL on one attempt and free-generated a different query on another. Isolated this from a second, independent issue (the MAS rewrites the user's question before invoking the Genie tool) by querying the Genie space directly via `ask_genie`. Documented as a standing limitation, not a one-time bug, and added as a caveat directly in `docs/serving/genie_space.md`, which had overstated the "pin the SQL" guarantee since `v0.4`. Step 6.9: confirmed (not assumed) minimal access control on the MAS endpoint, wrote `docs/serving/sql_agent.md` mirroring Step 6.6's pattern, with Step 6.8's findings surfaced prominently as known limitations rather than left buried in a changelog entry. §9 acceptance criteria, §10 Key Takeaways, and §11 Knowledge Check filled in for the complete module. | Chirag + Claude |

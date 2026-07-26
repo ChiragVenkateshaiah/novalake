@@ -454,10 +454,53 @@ guarantee.
     from-scratch text-to-SQL agent — either way, carry forward every
     guardrail in `docs/serving/genie_space.md`/`question_catalog.md`
     explicitly, especially the excluded-UUID-columns precedent (quoted in
-    §4 above, not paraphrased)
-  - *Task:* ___
-  - *Expected output:* ___
-  - *Validation check:* ___
+    §4 above, not paraphrased). **Decided:** wrap, don't re-declare — a
+    Supervisor Agent (MAS) can reference an existing Genie space directly
+    via `genie_space_id`, so every guardrail already curated into the space
+    (instructions, certified queries, the excluded-UUID-columns exclusion)
+    is inherited as-is, not re-derived or restated in a second place where
+    it could drift from the source of truth.
+  - *Task:* Presented the exact `manage_mas(create_or_update, ...)`
+    parameters (name, single `gold_analytics` agent referencing
+    `genie_space_id: 01f184ef1ae217509fe577597f00deb6`, routing
+    instructions, 3 examples covering a certified question, a guardrail
+    question, and an explicit out-of-scope probe) and got Chirag's
+    go-ahead before creating anything, per ADR-0009. Created the MAS tile
+    (`NovaLake Analytics Assistant`, endpoint `mas-1b6eda83-endpoint`).
+    Verified live rather than trusting the tool's own `get` response, which
+    under-reported `instructions` as empty and `examples_count` as 0 —
+    cross-checked with `databricks supervisor-agents list-supervisor-agents`
+    directly, which confirmed `instructions` **was** correctly applied (a
+    tool-reporting gap, not a write failure, the same class of issue as
+    `columns_to_sync` earlier in Step 6.4). Examples were a genuine write
+    failure, not just under-reported — see Validation check.
+  - *Expected output:* A `READY` MAS tile routing all Gold-layer analytics
+    questions to the existing Genie space, declining free-text questions
+    the underlying space can't answer, with no new tables/indexes/data
+    touched — this step only orchestrates an existing asset.
+  - *Validation check:* Two live queries against `mas-1b6eda83-endpoint`.
+    (1) The certified question "What was our approval rate last quarter?"
+    correctly routed to `gold_analytics`, returned the real Genie-computed
+    value (74.78%), and was synthesized into a clean final answer. (2) The
+    explicit out-of-scope probe "What do customers say about a specific
+    complaint regarding refunds?" was correctly declined — the assistant
+    explained it only has structured/aggregate access, listed what it
+    *can* answer instead, and never called the Genie space unnecessarily.
+    **Known platform limitation, not fixed:** creating "examples"
+    (question/guideline pairs meant to reinforce routing) fails outright
+    with `MODEL_DISABLED` — Agent Bricks examples depend on an internal
+    embedding model (`qwen3-embedding-0-6b`) disabled on this Free Edition
+    workspace. Confirmed via direct CLI (`databricks supervisor-agents
+    create-example`), not just the MCP tool, so this is a genuine platform
+    constraint, not a workaround-able bug — no examples exist on this MAS
+    tile. Decided with Chirag: proceed without them, since both validation
+    queries above already prove routing/guardrail behavior works from
+    `instructions` alone. Separately (worth recording, not a blocker):
+    found a real bug in the `manage_mas` MCP tool along the way — its
+    `examples` field sends `{question, guideline}` (singular key, string)
+    but the actual API expects `{question, guidelines}` (plural key,
+    array); relevant if this tool's example-creation path is ever retried
+    on a workspace where the embedding-model constraint doesn't apply.
 - **Step 6.8 — Offline eval set for SQL correctness**
   - *Objective:* reuse `question_catalog.md`'s 6 certified question→SQL
     pairs directly as a starting set, extended with new text-to-SQL-specific

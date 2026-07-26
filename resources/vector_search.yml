@@ -1,0 +1,42 @@
+resources:
+  vector_search_endpoints:
+    novalake_rag:
+      name: novalake-rag
+      endpoint_type: STORAGE_OPTIMIZED
+
+  vector_search_indexes:
+    rag_support_ticket_index:
+      name: ${var.catalog}.gold.rag_support_ticket_index
+      endpoint_name: ${resources.vector_search_endpoints.novalake_rag.name}
+      primary_key: ticket_key
+      index_type: DELTA_SYNC
+      index_subtype: HYBRID
+      delta_sync_index_spec:
+        source_table: ${var.catalog}.gold.rag_support_ticket_corpus
+        pipeline_type: TRIGGERED
+        embedding_source_columns:
+          - name: content
+            embedding_model_endpoint_name: databricks-gte-large-en
+        # columns_to_sync intentionally omitted: rag_support_ticket_corpus's
+        # 8 columns are exactly the full set this index needs, so "sync all
+        # columns from source" (the default when this field is left blank)
+        # is identical in effect to naming them explicitly -- and matches
+        # what GetIndex reports live (this field is write-only, never
+        # returned), which naming them explicitly does not.
+
+    rag_review_index:
+      name: ${var.catalog}.gold.rag_review_index
+      endpoint_name: ${resources.vector_search_endpoints.novalake_rag.name}
+      primary_key: review_key
+      index_type: DELTA_SYNC
+      index_subtype: HYBRID
+      delta_sync_index_spec:
+        source_table: ${var.catalog}.gold.rag_review_corpus
+        pipeline_type: TRIGGERED
+        embedding_source_columns:
+          - name: content
+            embedding_model_endpoint_name: databricks-gte-large-en
+        # columns_to_sync intentionally omitted -- same reasoning as
+        # rag_support_ticket_index above: rag_review_corpus's 9 columns are
+        # the full set, so leaving this blank (sync all) matches both the
+        # original creation intent and what GetIndex reports live.

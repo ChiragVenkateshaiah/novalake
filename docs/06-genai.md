@@ -1,7 +1,8 @@
 # Module 6 · GenAI
 
-`Status:` Draft — scoping only, build not started  ·  `Owner:` Chirag  ·
-`Last updated:` v0.6 (scoping, 2026-07-24)  ·  `Est. time:` ___
+`Status:` Step-group A (RAG, §6.1–6.6) complete; Step-group B (text-to-SQL,
+§6.7–6.9) not started  ·  `Owner:` Chirag  ·
+`Last updated:` v0.6 (Step-group A complete, 2026-07-26)  ·  `Est. time:` ___
 
 **Sequencing decision (recorded here, not in a separate ADR — this is a
 scope/sequencing call for this one module, not standing architecture):** RAG
@@ -17,19 +18,25 @@ directly, gated by per-action review — see `CLAUDE.md`'s operational summary
 of that gate before running any step below.
 
 ## 1. Learning Objectives
-- [ ] Can decide what free text is safe to embed into a retrievable index and
+- [x] Can decide what free text is safe to embed into a retrievable index and
       what needs masking first, before building the index — not as an
-      afterthought once retrieval already works
-- [ ] Can carry forward serving-layer guardrails (established at `v0.4`'s
+      afterthought once retrieval already works (Step 6.1: checked both
+      generators' source directly, found no PII interpolated into
+      ticket/review text, verified against live materialized data too)
+- [x] Can carry forward serving-layer guardrails (established at `v0.4`'s
       Genie space) into a new consumer surface deliberately, instead of
-      re-deriving them from scratch or silently dropping them
-- [ ] Can evaluate a RAG/text-to-SQL system against an offline eval set with
+      re-deriving them from scratch or silently dropping them (Step 6.6:
+      SQL-aggregate guardrails carried forward as a structural exclusion —
+      no SQL tool at all — not just a repeated instruction)
+- [x] Can evaluate a RAG/text-to-SQL system against an offline eval set with
       groundedness and correctness scorers, not just "it looks right" spot
-      checks
-- [ ] Can operate under a review-then-act agentic workflow — proposing a live
+      checks (Step 6.5: found and fixed a real prompt-injection leak by
+      auditing raw judge rationale, not just reading aggregate percentages)
+- [x] Can operate under a review-then-act agentic workflow — proposing a live
       workspace action with full parameters and waiting for explicit
       go-ahead, rather than either asking permission vaguely or acting
-      unilaterally
+      unilaterally (every gated action in Steps 6.3–6.6, logged in
+      `docs/checkpoint.md`'s revisit log)
 
 ## 2. Prerequisites
 - Completed modules: `v0.4` Serving (Genie space + dashboard on Gold, tagged
@@ -405,10 +412,32 @@ guarantee.
     verified live: querying the deployed endpoint with the exact injection
     probe now returns a correct refusal, no leak.
 - **Step 6.6 — Serving surface + access control**
-  - *Objective:* ___
-  - *Task:* ___
-  - *Expected output:* ___
-  - *Validation check:* ___
+  - *Objective:* document the deployed agent as a reviewable serving-surface
+    spec (mirroring `docs/serving/genie_space.md`'s pattern for the Genie
+    space) and confirm — not assume — that access to it is correctly scoped.
+  - *Task:* Checked live UC grants (`manage_uc_grants(get)` on
+    `novalake.genai`) and endpoint permissions
+    (`serving-endpoints get-permissions`) directly rather than assuming a
+    default. Wrote `docs/serving/support_assist_agent.md`: purpose, the two
+    tools it has (and structurally lacks — no SQL access, so
+    `genie_space.md`'s SQL-aggregate guardrails #1/#2/#4 can't be violated
+    by this surface at all, not just "shouldn't be" per instruction), the
+    system prompt including the Step 6.5 anti-leak fix, and the known
+    limitations Step 6.5's eval actually surfaced (Llama tool-call
+    flakiness, the `grounded_refusal` judge-reliability caveat) rather than
+    a generic limitations boilerplate.
+  - *Expected output:* `docs/serving/support_assist_agent.md`, confirming
+    current live state (v2, 100% traffic; owner/admin-only access, zero
+    explicit grants on `novalake.genai`).
+  - *Validation check:* Both checks were read-only and ungated per
+    ADR-0009. UC grants: `assignments: []` on `novalake.genai` — no broader
+    grant exists to catch. Endpoint permissions: `CAN_MANAGE` for Chirag
+    (explicit) and the `admins` group (inherited from `/serving-endpoints`)
+    only — no `CAN_QUERY`-to-everyone or similar broad grant present. This
+    is a solo Free Edition workspace with no second identity to scope
+    access for yet (unlike `v0.5`'s `novalake-cicd` service principal), so
+    the correct action was confirming the minimal default, not adding a new
+    grant — revisit if a second workspace identity is ever introduced.
 - **[Recommended] Tag `v0.6.0-rag`** at the end of Step-group A, before
   Step-group B starts — `main` would otherwise carry a working,
   live-resource-backed RAG deployment with no rollback marker between the
@@ -443,13 +472,31 @@ guarantee.
   - *Validation check:* ___
 
 ## 7. Operational Considerations
-- Idempotency / re-run safety: ___
-- Incremental vs full refresh: ___ (how the index stays in sync with Gold
-  as new events land — a decision Step 6.2/6.3 need to make explicit)
+- Idempotency / re-run safety: `manage_jobs(create)` is idempotent (returns
+  the existing job if the name matches, confirmed by reuse across Steps
+  6.4–6.5's repeated runs); `mlflow.register_model` always creates a new
+  version rather than overwriting one; `agents.deploy()` called again with
+  the same UC model name adds a new version to the existing endpoint rather
+  than duplicating it — observed directly when v2 was deployed alongside
+  v1 rather than creating a second endpoint (Step 6.5's redeploy).
+- Incremental vs full refresh: `TRIGGERED` sync (decided Step 6.2) — the
+  index does **not** auto-refresh as new rows land in the corpus tables; a
+  manual/scheduled `manage_vs_data(sync)` re-syncs from current state. No
+  scheduled refresh job exists yet. Not a gap in practice for this
+  project's static synthetic dataset, but a real limitation if the
+  generators are ever re-run to add rows — revisit then, not now.
 - Performance (partitioning / clustering / file sizing): not applicable to
   the RAG index in the traditional sense; index sizing/sync mode is a
   parameter Step 6.3's MCP-gated creation must surface for approval
-- Failure & retry behaviour: ___
+- Failure & retry behaviour: two real failure modes surfaced and handled
+  during the build, not theoretical: (1) the FMAPI
+  `databricks-meta-llama-3-3-70b-instruct` endpoint intermittently emits a
+  malformed tool-call and 400s — confirmed transient, a single retry
+  succeeds (Step 6.4's live endpoint verification); (2) any job-based
+  script calling `mlflow.start_run()`/`mlflow.search_traces()` needs an
+  explicit `mlflow.set_experiment(...)` first — unlike an interactive
+  notebook, a `spark_python_task` has no implicit default experiment (hit
+  twice, in both `log_model.py` and the eval scripts, before being fixed).
 
 ## 8. Data Quality & Governance
 - Expectations / rules applied: the 4 adversarial-misuse guardrails from
@@ -460,21 +507,39 @@ guarantee.
   masking needed — verified against both generators' source and the live
   materialized data, not assumed. Full evidence trail in §5. Must be
   re-verified if the data generators change.
-- Quarantine / reject handling: ___
-- Lineage & catalog tags: ___
+- Quarantine / reject handling: not applicable — the RAG corpus tables
+  (Step 6.1/6.2) are a straight materialization of already-tested Gold
+  fact-table columns; no new data-quality dimension is introduced beyond
+  the existing `not_null`/`unique` dbt tests on `ticket_key`/`review_key`,
+  already green.
+- Lineage & catalog tags: no manual lineage annotation needed — Unity
+  Catalog's automatic lineage graph already tracks
+  `rag_support_ticket_corpus`/`rag_review_corpus` back to their source Gold
+  tables via dbt's normal materialization. No custom catalog tags applied;
+  not needed yet in this single-catalog solo workspace.
 - Ownership & access: MCP-gated actions per ADR-0009 govern who/what can
   create or modify the live Vector Search/Agent Bricks resources this
   module introduces; every executed action is logged to
-  `docs/checkpoint.md`'s revisit-log (see ADR-0009 §3)
+  `docs/checkpoint.md`'s revisit-log (see ADR-0009 §3). Step 6.6 confirmed
+  live UC grants (`novalake.genai`: zero explicit grants) and endpoint
+  permissions (`novalake-support-assist`: owner + inherited-admin only) are
+  already minimal — see `docs/serving/support_assist_agent.md`.
 
 ## 9. Validation & Acceptance Criteria
 - [x] RAG corpus + PII policy decided and recorded (§5) — 2026-07-24,
       `fct_support_tickets.description` + `fct_reviews.title`/`body`,
       no masking needed (verified against generator source + live data)
-- [ ] Vector Search index live, queryable, results grounded per eval (§6.5)
+- [x] Vector Search index live, queryable, results grounded per eval (§6.5)
+      — both indexes `ready: true`, row counts match source tables exactly;
+      agent deployed to `novalake-support-assist` (v2, 100% traffic),
+      queried live with grounded/cited answers; offline eval found and the
+      fix confirmed via regression re-run (`no_prompt_leak`=100%)
 - [ ] Text-to-SQL surface live, inheriting Genie's guardrails, correctness
-      eval passing (§6.8)
-- [ ] Sign-off: ___
+      eval passing (§6.8) — Step-group B, not started
+- [x] Sign-off (Step-group A only, per §6's rollback-marker decision):
+      Chirag confirmed each gated action live via explicit go-ahead
+      (Steps 6.3–6.6, logged in `docs/checkpoint.md`); full-module sign-off
+      still pending Step-group B
 
 ## 10. Key Takeaways
 - ___
@@ -504,3 +569,4 @@ guarantee.
 | 2026-07-24 | **Step 6.3 (support-ticket index) done — first gated MCP actions executed under ADR-0009.** Presented the exact tool calls and full parameter set, got Chirag's explicit go-ahead, then created the `novalake-rag` endpoint (`STORAGE_OPTIMIZED`, `ONLINE` immediately — this doubled as the Free Edition availability check ADR-0009's Consequences called for) and `novalake.gold.rag_support_ticket_index` (`DELTA_SYNC`, `TRIGGERED`). Initial sync ran unusually long with no error, stuck reporting "Provisioning pipeline compute..."; diagnosed live (checked Jobs & Pipelines, found nothing — inconclusive, not evidence of failure, since Vector Search sync runs on internal managed compute) rather than assumed broken. Resolved after Chirag reloaded the Databricks UI; confirmed independently via CLI (`"ready": true, "indexed_row_count": 1255"`, matching the source table exactly). Retrieval verified with a real test query — 3 semantically on-target results, not just "index exists." Full action-by-action audit trail logged to `docs/checkpoint.md` per ADR-0009 §3. Review index deliberately not built yet, per ADR-0009's "start narrow." | Chirag + Claude |
 | 2026-07-24 | **Step 6.3 completed — review index created.** Same gate discipline as the ticket index: exact parameters presented, explicit go-ahead, `manage_vs_index` on the existing `novalake-rag` endpoint (no second endpoint needed). Same slow-initial-sync pattern recurred, but this time resolved on its own via CLI polling with no UI reload — weakens the earlier "reload fixed it" theory; more likely both were just genuinely slow first-sync provisioning the status API under-reports, not reload-dependent. `indexed_row_count: 1034` matched the source table exactly; retrieval verified with a real query, 3 on-target "Saved me during travel" results. Both v0.6a indexes (tickets, reviews) are now live and validated end-to-end. Open item carried forward: whether DAB supports a Vector Search resource type at all (ADR-0009's Consequences) still hasn't been checked — both indexes exist only as MCP-created resources, not bundle IaC. | Chirag + Claude |
 | 2026-07-26 | **DAB-support open item resolved; Step 6.3's resources retrofitted to bundle IaC; Step 6.4 design decided.** `databricks bundle schema` confirmed Vector Search endpoints/indexes are real DAB resource types (CLI v1.7.0) — `resources/vector_search.yml` authored by hand (no `bundle generate` support for this type), adopted via `bundle deployment bind`, reconciled via `bundle deploy`. A first bind attempt would have force-recreated both indexes (`columns_to_sync` null→explicit diff); fixed by omitting the field once the corpus tables' full column sets were confirmed to already equal it. Live state verified unchanged after deploy. Separately, checked Agent Bricks Knowledge Assistant in detail for Step 6.4 and found it can't consume an externally-built Vector Search index (Volume-of-files ingestion only) — decided with Chirag on a custom MLflow `ChatAgent` on Databricks Model Serving instead, querying the two existing indexes directly, so Steps 6.2–6.3's work isn't orphaned. Full technical trail (bind/deploy commands, the process gap where `bundle deploy` applied without a plan/confirmation prompt unlike `bind`, and the live-state verification that followed) logged in `docs/checkpoint.md`'s 2026-07-26 entry. | Chirag + Claude |
+| 2026-07-26 | **Step-group A complete — Steps 6.4, 6.5, 6.6 all done same day.** Step 6.4: built a LangGraph `ResponsesAgent` (`src/genai/agent.py`) with two separate `VectorSearchRetrieverTool`s so tickets/reviews can never be blended even before the prompt is applied; logged to UC (`novalake.genai.support_assist_agent`) and deployed to Model Serving (`novalake-support-assist`, `scale_to_zero=True` — required on this Free Edition workspace, not optional). `execute_code` proved unusable on this workspace this session (unsupported REPL channel, a real MCP-tool-side bug in the documented workaround, no cluster available) — every execution step pivoted to ad-hoc jobs instead, the same pattern `resources/dbt_job.yml` already used. Step 6.5: built a two-list offline eval (`src/genai/eval_dataset.py`/`eval_agent.py`) and, critically, manually audited the raw judge rationale rather than trusting aggregate percentages — this caught a real prompt-injection vulnerability (the agent leaked its full system prompt when told to "ignore your instructions"), fixed with an explicit anti-leak rule and a permanent regression scorer, then redeployed as UC model version 2 the same day so the live endpoint was never left serving the known-vulnerable prompt. The audit also caught two scorer-design problems that looked like agent failures but weren't (a conditional Guidelines judge misapplied to rows where its premise didn't hold; a false-negative on the source-blending guardrail) — both documented rather than silently accepted or silently "fixed" by relaxing the check. Step 6.6: confirmed (not assumed) that live UC grants and endpoint permissions were already minimally scoped, and wrote `docs/serving/support_assist_agent.md` as the reviewable serving-surface spec, mirroring `genie_space.md`'s pattern. Full gated-action trail for all three steps logged in `docs/checkpoint.md`. §1/§7/§8/§9 filled in for Step-group A's actual scope, not left as headers, ahead of the `v0.6.0-rag` tag. | Chirag + Claude |

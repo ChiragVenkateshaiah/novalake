@@ -120,7 +120,14 @@ Operational summary — this is what actually governs behavior day to day:
   `manage_vs_index`, `manage_vs_data` (an index *upsert* is a write, not
   "just search"); `manage_genie`/`manage_ka`/`manage_mas` create/update/
   delete; `manage_uc_objects`, `manage_uc_grants`/`manage_uc_security_policies`,
-  `manage_workspace`/`manage_workspace_files` writes.
+  `manage_workspace`/`manage_workspace_files` writes; `manage_pipeline`/
+  `manage_pipeline_run` create/update/delete/run (from `v0.7`). This list
+  covers MCP tool calls specifically — when a plan's actual execution path is
+  the Databricks CLI instead (as `v0.7`'s pipeline deploy is), the equivalent
+  CLI commands are gated the same way and must be named just as explicitly:
+  `databricks bundle deploy`, `databricks bundle run`, and any ad-hoc
+  `CREATE SCHEMA`/`DROP TABLE`/similar DDL run via CLI or SQL, whether or not
+  it happens to be issued through an MCP tool.
 - **Every executed gated action gets logged to `docs/checkpoint.md`'s
   revisit-log** — dated, naming the tool call, parameters, and outcome. File
   changes are already visible in git history; live MCP actions are not.

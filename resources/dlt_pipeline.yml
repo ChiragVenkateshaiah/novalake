@@ -1,0 +1,49 @@
+resources:
+  pipelines:
+    novalake_dlt_transactions:
+      name: "[${bundle.target}] novalake DLT Silver transactions (compare)"
+      catalog: ${var.catalog}
+      schema: bronze_dlt        # exactly one of schema/target required (schema
+                                  # is the non-deprecated field); this is the
+                                  # pipeline's *default* target schema -- every
+                                  # Silver DDL under pipelines/transformations/
+                                  # is written fully schema-qualified
+                                  # (novalake.silver_dlt.<table>) precisely so
+                                  # nothing relies on this default (see
+                                  # pipelines/transformations/silver/*.sql).
+      serverless: true
+      edition: ADVANCED          # documented requirement whenever EXPECT is
+                                  # used at all (CORE errors on any expectation;
+                                  # PRO is what AUTO CDC/SCD needs, not what's
+                                  # used here) -- independent of the CDC-skip
+                                  # decision (docs/adr/0010). Stated as the
+                                  # documented expectation, not pre-confirmed:
+                                  # edition is not generally applicable to
+                                  # serverless pipelines, so the live deploy is
+                                  # what actually confirms or contradicts this.
+      channel: CURRENT
+      continuous: false          # triggered, matches the existing dbt_task
+      root_path: ../pipelines
+      libraries:
+        - glob:
+            include: ../pipelines/transformations/**
+      event_log:
+        catalog: ${var.catalog}   # confirmed via `databricks bundle schema`
+        schema: bronze_dlt         # (CLI v1.7.0): catalog/schema/name, all
+        name: event_log            # required together -- needed for
+                                    # Experiment 2's row-content recoverability
+                                    # check and the ExpectationMetrics check
+                                    # (see docs/07-declarative-pipelines.md).
+      configuration:
+        novalake.catalog: ${var.catalog}   # namespaced key, not a bare
+                                             # `catalog:` per Databricks'
+                                             # reserved-key-name warning
+        spark.sql.session.timeZone: UTC     # removes session-timezone
+                                             # dependency from any date()/
+                                             # timestamp comparisons
+      # development: true intentionally not set -- inherited from
+      # databricks.yml's dev-target preset (presets.pipelines_development:
+      # true). databricks.yml's own comment already explains why: "The two
+      # dev-mode presets that actually matter for future resources are kept
+      # explicitly below" -- this pipeline is the first resource that preset
+      # was kept in anticipation of.

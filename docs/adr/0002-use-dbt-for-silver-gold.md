@@ -1,8 +1,13 @@
 # ADR-0002: Use dbt for Silver→Gold, defer Declarative Pipelines to `v0.7`
 
-**Status:** Accepted
+**Status:** Accepted — partially superseded by
+[ADR-0010](0010-v0.7-silver-not-gold-comparison-target.md) (2026-07-27):
+`v0.7`'s DLT comparison target is Silver, not Gold, as originally worded in
+the Decision below. This ADR's other content — dbt as the primary Silver→Gold
+path from `v0.2`, DLT deferred to `v0.7` at all — remains accurate history;
+only "re-implement part of **Gold**" no longer holds.
 **Date:** 2026-07-16
-**Related:** [ADR-0001](0001-adopt-dab-from-v0.1.md)
+**Related:** [ADR-0001](0001-adopt-dab-from-v0.1.md), [ADR-0010](0010-v0.7-silver-not-gold-comparison-target.md)
 
 ## Context
 

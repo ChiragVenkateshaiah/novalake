@@ -19,17 +19,20 @@ See that file for the full discussion. ADRs 0006–0008 came from `v0.5`
 (CI/CD) — the checkpoint's explicit re-open point for agent-authored IaC —
 after checking this workspace's actual auth capabilities directly rather
 than assuming. ADR-0009 came from `v0.6` scoping — the checkpoint's next
-re-open point, for the actual agentic-integration architecture. 0007–0009
-each went through a second-model-pass review before being accepted, same
-discipline as 0001–0005 (0009's review covered both the scoping plan that
-proposed it and the drafted ADR file itself).
+re-open point, for the actual agentic-integration architecture. ADR-0010 came
+from `v0.7` planning — a scope deviation from ADR-0002 surfaced during
+implementation planning, folded in after external pressure-testing and two
+Opus review passes on the `v0.7` plan itself. 0007–0010 each went through a
+second-model-pass review before being accepted, same discipline as 0001–0005
+(0009's review covered both the scoping plan that proposed it and the drafted
+ADR file itself).
 
 ## Index
 
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-adopt-dab-from-v0.1.md) | Adopt Databricks Asset Bundles from `v0.1`, not `v0.5` | Accepted |
-| [0002](0002-use-dbt-for-silver-gold.md) | Use dbt for Silver→Gold, defer Declarative Pipelines to `v0.7` | Accepted |
+| [0002](0002-use-dbt-for-silver-gold.md) | Use dbt for Silver→Gold, defer Declarative Pipelines to `v0.7` | Accepted — partially superseded by 0010 |
 | [0003](0003-dev-only-bundle-target.md) | Keep `databricks.yml` dev-only until `v0.5` (CI/CD) | Accepted — partially superseded by 0007 |
 | [0004](0004-local-dbt-development-workflow.md) | Develop dbt locally; reserve the DAB `dbt_task` for orchestrated runs | Accepted |
 | [0005](0005-dbt-schema-generation-convention.md) | Override `generate_schema_name` so dbt schemas map 1:1 to Unity Catalog | Accepted |
@@ -37,3 +40,4 @@ proposed it and the drafted ADR file itself).
 | [0007](0007-defer-prod-no-same-workspace-production-semantics.md) | Defer `prod` — no same-workspace production semantics | Accepted |
 | [0008](0008-novalake-terminus-and-cerberus-succession.md) | NovaLake terminus at `v0.9`; production semantics and Terraform IaC succeed to Cerberus | Accepted |
 | [0009](0009-agentic-integration-mcp-gated-review-then-act.md) | Agentic integration for `v0.6`+ — MCP-gated, review-then-act | Accepted |
+| [0010](0010-v0.7-silver-not-gold-comparison-target.md) | `v0.7`'s DLT comparison target is Silver, not Gold | Accepted |

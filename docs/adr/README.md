@@ -22,10 +22,13 @@ than assuming. ADR-0009 came from `v0.6` scoping — the checkpoint's next
 re-open point, for the actual agentic-integration architecture. ADR-0010 came
 from `v0.7` planning — a scope deviation from ADR-0002 surfaced during
 implementation planning, folded in after external pressure-testing and two
-Opus review passes on the `v0.7` plan itself. 0007–0010 each went through a
-second-model-pass review before being accepted, same discipline as 0001–0005
-(0009's review covered both the scoping plan that proposed it and the drafted
-ADR file itself).
+Opus review passes on the `v0.7` plan itself. ADR-0011 came from `v0.9`
+planning — the GB-scale data regeneration architecture ADR-0008 pinned as a
+prerequisite but didn't design, folded in after an AskUserQuestion round with
+Chirag and one Opus review pass on the `v0.9` plan itself. 0007–0011 each
+went through a second-model-pass review before being accepted, same
+discipline as 0001–0005 (0009's review covered both the scoping plan that
+proposed it and the drafted ADR file itself).
 
 ## Index
 
@@ -41,3 +44,4 @@ ADR file itself).
 | [0008](0008-novalake-terminus-and-cerberus-succession.md) | NovaLake terminus at `v0.9`; production semantics and Terraform IaC succeed to Cerberus | Accepted |
 | [0009](0009-agentic-integration-mcp-gated-review-then-act.md) | Agentic integration for `v0.6`+ — MCP-gated, review-then-act | Accepted |
 | [0010](0010-v0.7-silver-not-gold-comparison-target.md) | `v0.7`'s DLT comparison target is Silver, not Gold | Accepted |
+| [0011](0011-gb-scale-data-regeneration.md) | GB-scale synthetic data regeneration architecture (`v0.9` prerequisite) | Accepted |

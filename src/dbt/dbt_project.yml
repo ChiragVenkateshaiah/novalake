@@ -13,36 +13,46 @@ clean-targets: ["target", "dbt_packages"]
 
 models:
   novalake:
+    # v0.9 (docs/adr/0011-gb-scale-data-regeneration.md): under is_gb_scale,
+    # staging/intermediate/gold/gold.metrics flip from view to table -- liquid
+    # clustering and OPTIMIZE only apply to physical Delta tables, which is
+    # the whole point of the GB-scale build. gold.genai is deliberately
+    # excluded below (GenAI-on-GB-scale isn't in v0.9's scope). var() here
+    # resolves ONLY from CLI --vars, not from a `vars:` block in this same
+    # file -- the inline `false` default is what makes the unflagged path
+    # stay a view; a later `vars:` default would NOT override this
+    # expression's own default the way it looks like it should.
     staging:
       # dbt's "staging" convention and the project's "Silver" medallion layer are
       # treated as the same thing here, on purpose — not a naming oversight.
       +schema: silver
-      +materialized: view
+      +materialized: "{{ 'table' if var('is_gb_scale', false) else 'view' }}"
     intermediate:
       # Real Silver transform work (dedupe, drift-fix, explode, DLQ split) —
       # still Silver's UC schema, just not the thin 1:1 "staging" convention.
       +schema: silver
-      +materialized: view
+      +materialized: "{{ 'table' if var('is_gb_scale', false) else 'view' }}"
     gold:
       # Conformed dims/facts on top of Silver. +schema: gold maps 1:1 to
       # Unity Catalog's novalake.gold via the same generate_schema_name
       # override as staging/intermediate (ADR-0005).
       +schema: gold
-      +materialized: view
+      +materialized: "{{ 'table' if var('is_gb_scale', false) else 'view' }}"
       metrics:
         # Pre-aggregated business-metric rollups — a different kind of model
         # than atomic dims/facts, worth its own declared block even though it
         # resolves to the same schema (same reasoning as staging/intermediate
         # being declared separately).
         +schema: gold
-        +materialized: view
+        +materialized: "{{ 'table' if var('is_gb_scale', false) else 'view' }}"
       genai:
         # RAG corpus tables (v0.6) — the one deliberate exception to Gold's
         # view-only convention. Vector Search's Delta Sync index requires a
         # physical Delta table to sync from; these exist purely as that
         # source, not as new Gold facts. CDF enabled so Vector Search's
         # incremental sync (including deletions) works correctly — see
-        # docs/06-genai.md Step 6.2.
+        # docs/06-genai.md Step 6.2. Deliberately NOT is_gb_scale-aware —
+        # GenAI-on-GB-scale data isn't in v0.9's scope (docs/adr/0011).
         +schema: gold
         +materialized: table
         +tblproperties:

@@ -2,7 +2,8 @@
 """
 NovaPay "paginated API export" generator -> multiLine JSON array.
 
-Output shape (the whole file is ONE pretty-printed JSON ARRAY):
+Output shape: one or more files, each a whole pretty-printed JSON ARRAY of
+page documents:
 
     [
       { page document 1 },
@@ -21,7 +22,7 @@ Each page document is a deeply nested envelope:
       "audit":           { warnings[], lineage[] }
     }
 
-Read with:  spark.read.option("multiLine", "true").json(path)
+Read each file with:  spark.read.option("multiLine", "true").json(path)
 -> yields ONE ROW PER PAGE. Everything else is explode + flatten + join + map-parse.
 
 Deliberate, near-real complexity (see dataset_guide_multiline.md for the full list):
@@ -35,20 +36,41 @@ Deliberate, near-real complexity (see dataset_guide_multiline.md for the full li
   - record_counts that intentionally disagree with actual array length (reconciliation)
   - stringified-JSON dead-letter records in partial_failures[] (from_json DLQ pattern)
   - schema drift v1/v2, mixed-type fields, malformed nested values, nulls/empties/missing
+
+v0.9 rewrite (see docs/adr/0011-gb-scale-data-regeneration.md): the original
+built every page fully in memory before one json.dump() call -- both a
+memory problem and, independently, a Spark-correctness problem at GB scale
+(multiLine=true reads a whole file as one task regardless of memory). This
+version batches pages into multiple files (--pages-per-file), writing and
+discarding each batch before starting the next.
+
+PAGE NUMBERING STAYS GLOBAL AND MONOTONIC ACROSS THE WHOLE RUN, independent
+of which file a page lands in -- this is the detail that keeps
+src/dbt/models/intermediate/int_multiline_merchants.sql's cross-page
+dimension resolution (row_number() over (partition by merchant_id order by
+as_of_page desc)) working with ZERO SQL changes: that logic only needs
+as_of_page to be a globally comparable ordering, not that all pages live in
+one file.
+
+Run with no flags, this still reproduces the original small-scale output
+(9 pages, seed 43) as a single payments_events_multiline.json file -- a
+working smoke test at that scale, not just a GB-scale tool. Multi-file
+output (payments_events_multiline_part_NNNNN.json) only kicks in once
+--pages-per-file is smaller than the total page count.
 """
 
+import argparse
 import json
+import math
+import os
 import random
 import uuid
 import datetime as dt
 
-SEED = 43
-random.seed(SEED)
-
-N_PAGES = 9
-EVENTS_PER_PAGE = (380, 520)   # randomised per page -> ~4,000+ events total
 START = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
 END = dt.datetime(2026, 6, 15, tzinfo=dt.timezone.utc)
+
+EVENTS_PER_PAGE = (380, 520)   # randomised per page -> ~450 events/page average
 
 # ---------------------------------------------------------------------------
 # Pools (original text)
@@ -112,6 +134,18 @@ RISK_NOTES = ["Multiple high-value attempts from a new device within minutes of 
               "Billing country and IP geolocation diverge by more than expected.",
               "Card tested with small amounts before a large purchase attempt.",
               "Spending deviates sharply from the customer's 90-day baseline."]
+
+# ---------------------------------------------------------------------------
+# Skew injection (v0.9, additive -- see docs/adr/0011-gb-scale-data-regeneration.md)
+# ---------------------------------------------------------------------------
+
+SKEW_MERCHANT_IDS = []
+SKEW_SHARE = 0.6
+
+def pick_merchant_id():
+    if SKEW_MERCHANT_IDS and random.random() < SKEW_SHARE:
+        return random.choice(SKEW_MERCHANT_IDS)
+    return f"mer_{random.randint(1000, 1099)}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -187,7 +221,7 @@ def build_transaction(v2, status):
 
     base = {
         "transaction": {                                   # extra nesting level
-            "merchant_id": f"mer_{random.randint(1000, 1099)}",
+            "merchant_id": pick_merchant_id(),
             "payment_method": pm,
             "line_items": maybe(line_items(), 0.05),
             "fees": [{"kind": random.choice(["processing", "fx", "platform"]),
@@ -252,7 +286,7 @@ def build_review(v2):
                       cur=random.choice(CUR_CLEAN))
     return {
         "review": {
-            "merchant_id": f"mer_{random.randint(1000, 1099)}",
+            "merchant_id": pick_merchant_id(),
             "rating": random.choice([1, 2, 3, 3, 4, 4, 5, 5, 5]),
             "title": title, "body": body,
             "media": [{"type": random.choice(["image", "video"]),
@@ -302,7 +336,7 @@ def build_refund(v2):
             ("customer_id" if v2 else "cust_id"): cust()}
 
 def build_payout(v2):
-    return {"merchant_id": f"mer_{random.randint(1000, 1099)}",
+    return {"merchant_id": pick_merchant_id(),
             "gross_amount": amt() * random.randint(2, 40), "currency": cur(),
             "schedule": {"cycle": random.choice(["daily", "weekly", "monthly"]),
                          "scheduled_for": iso(rand_ts()),
@@ -368,6 +402,7 @@ def build_event():
 # Embedded reference data (with CROSS-PAGE drift)
 # ---------------------------------------------------------------------------
 def merchants_for_page(page_no):
+    """page_no is the GLOBAL page index across the whole run (not per-file)."""
     out = []
     for mid in range(1000, 1100):
         if random.random() < 0.4:                # only a slice appears per page
@@ -439,6 +474,7 @@ def partial_failures():
 # Assemble pages
 # ---------------------------------------------------------------------------
 def build_page(page_no, total_pages):
+    """page_no and total_pages are both GLOBAL across the whole run."""
     n_events = random.randint(*EVENTS_PER_PAGE)
     events = [build_event() for _ in range(n_events)]
 
@@ -481,25 +517,80 @@ def build_page(page_no, total_pages):
     }
 
 def main():
-    pages = [build_page(i, N_PAGES) for i in range(N_PAGES)]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n-pages", type=int, default=9,
+                         help="Direct page count (original interface). Ignored if --n-events is given.")
+    parser.add_argument("--n-events", type=int, default=None,
+                         help="Target total event count; total pages computed from the "
+                              "~450 events/page average (v0.9 GB-scale interface).")
+    parser.add_argument("--seed", type=int, default=43)
+    parser.add_argument("--pages-per-file", type=int, default=None,
+                         help="Batch this many pages per output file. Default: all pages in "
+                              "one file (payments_events_multiline.json), matching original "
+                              "behavior. Set explicitly for GB scale (e.g. 200 full run, 20 pilot).")
+    parser.add_argument("--out-dir", default="/home/claude")
+    parser.add_argument(
+        "--skew-merchant-ids", type=int, default=0,
+        help="Number of merchant_ids (from mer_1000 upward) to make deliberately hot "
+             "(v0.9 skew-handling experiment; 0 = off, uniform draw, original behavior).",
+    )
+    args = parser.parse_args()
 
-    out_path = "/home/claude/payments_events_multiline.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(pages, f, ensure_ascii=False, indent=2)   # pretty -> genuine multiLine document
+    random.seed(args.seed)
 
-    # stats
-    import os
-    total_events = sum(len(p["data"]["events"]) for p in pages)
-    total_pf = sum(len(p["data"]["partial_failures"]) for p in pages)
-    total_merch = sum(len(p["reference_data"]["merchants"]) for p in pages)
-    total_cust = sum(len(p["reference_data"]["customers"]) for p in pages)
-    size_mb = os.path.getsize(out_path) / (1024 * 1024)
-    print(f"Pages                  : {len(pages)}")
+    global SKEW_MERCHANT_IDS
+    if args.skew_merchant_ids > 0:
+        SKEW_MERCHANT_IDS = [f"mer_{1000 + i}" for i in range(args.skew_merchant_ids)]
+
+    avg_events_per_page = sum(EVENTS_PER_PAGE) / 2
+    if args.n_events is not None:
+        total_pages = max(1, math.ceil(args.n_events / avg_events_per_page))
+    else:
+        total_pages = args.n_pages
+
+    pages_per_file = args.pages_per_file or total_pages  # default: everything in one file
+    single_file = pages_per_file >= total_pages
+
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    total_events = total_pf = total_merch = total_cust = 0
+    files_written = []
+    page_no = 0
+    file_idx = 0
+
+    while page_no < total_pages:
+        batch_size = min(pages_per_file, total_pages - page_no)
+        batch = [build_page(page_no + i, total_pages) for i in range(batch_size)]
+
+        if single_file:
+            out_path = os.path.join(args.out_dir, "payments_events_multiline.json")
+        else:
+            out_path = os.path.join(args.out_dir, f"payments_events_multiline_part_{file_idx:05d}.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(batch, f, ensure_ascii=False, indent=2)
+        files_written.append(out_path)
+
+        for p in batch:
+            total_events += len(p["data"]["events"])
+            total_pf += len(p["data"]["partial_failures"])
+            total_merch += len(p["reference_data"]["merchants"])
+            total_cust += len(p["reference_data"]["customers"])
+
+        page_no += batch_size
+        file_idx += 1
+        del batch  # discard before the next batch -- the actual "stream, not one big array" behavior
+
+    total_size_mb = sum(os.path.getsize(p) for p in files_written) / (1024 * 1024)
+
+    print(f"Pages                  : {total_pages}")
+    print(f"Files written          : {len(files_written)}")
     print(f"Total events           : {total_events}")
     print(f"Total partial_failures : {total_pf}")
     print(f"Total merchant rows     : {total_merch} (embedded dim, with cross-page drift)")
     print(f"Total customer rows     : {total_cust}")
-    print(f"File size              : {size_mb:.2f} MB")
+    print(f"Total size             : {total_size_mb:.2f} MB")
+    if SKEW_MERCHANT_IDS:
+        print(f"Skewed merchant_ids    : {SKEW_MERCHANT_IDS} ({SKEW_SHARE:.0%} combined draw share)")
 
 if __name__ == "__main__":
     main()

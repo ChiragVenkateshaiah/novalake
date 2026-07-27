@@ -47,12 +47,13 @@ new project, Cerberus, on AWS.**
   layer — query profiles, `EXPLAIN` plans, liquid clustering,
   `OPTIMIZE`/file compaction, join strategy, skew handling, UDF
   elimination.
-- **`v0.8` is reserved, not yet scoped.** Left as an explicit gap rather
-  than silently skipped — this ADR doesn't invent content for it. If a
-  concrete need surfaces before `v0.9` starts (e.g. promoting the existing
-  cross-cutting governance/observability row to a numbered phase), it
-  fills the slot; otherwise the roadmap collapses `v0.7` → `v0.9` directly
-  and this note is updated to say so.
+- **`v0.8` collapsed — 2026-07-27.** Left reserved (not yet scoped) through
+  `v0.7`'s completion, per this note's own original contingency: no concrete
+  need surfaced (the cross-cutting governance/observability row stayed a
+  cross-cutting concern, not a phase) before `v0.9` was ready to start, so
+  the roadmap collapses `v0.7` → `v0.9` directly, exactly as anticipated
+  here. `v0.8` is not reused for anything else — the tag is simply skipped.
+  `README.md`'s roadmap table updated to match.
 - **Prerequisite for v0.9**: regenerate synthetic payments data at GB
   scale (tens of millions of events). Optimization findings on the
   current 5–13 MB datasets would be noise, not engineering.

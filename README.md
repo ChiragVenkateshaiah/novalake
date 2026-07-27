@@ -60,13 +60,18 @@ records behind this shape.
 | `v0.4` | Serving | Genie space on Gold, dashboard/feature tables | Serving patterns, AI/BI |
 | `v0.5` | CI/CD | GitHub Actions, service-principal deploy to `dev`, `bundle validate` PR gate | Continuous deployment |
 | `v0.6` | GenAI | Vector Search + Agent Bricks support-assist RAG, text-to-SQL | RAG, agents, eval |
-| `v0.7` | Declarative Pipelines (compare) | Re-implement part of Gold with Lakeflow Declarative Pipelines | Declarative ETL, DQ-as-code, vs. dbt |
-| `v0.8` | *Reserved* | Not yet scoped — see [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md) | — |
+| `v0.7` | Declarative Pipelines (compare) | Re-implement part of Silver with Lakeflow Declarative Pipelines — retargeted from Gold, see [ADR-0010](docs/adr/0010-v0.7-silver-not-gold-comparison-target.md) | Declarative ETL, DQ-as-code, vs. dbt |
 | `v0.9` | Spark optimization (final phase) | Query profiles, `EXPLAIN`, liquid clustering, `OPTIMIZE`, join/skew tuning — within serverless's constraints, on GB-scale regenerated data | Spark optimization NovaLake's compute model can actually expose |
 | — | Cross-cutting | Unity Catalog governance, observability | Continuous, from `v0.1` onward |
 
 Each tag = a tagged GitHub release: the table/asset works, the logic is committed,
 the doc module is filled, and the validation checklist is green.
+
+**No `v0.8`.** It was left reserved, not yet scoped, through `v0.7`'s
+completion — [ADR-0008](docs/adr/0008-novalake-terminus-and-cerberus-succession.md)
+pre-authorized exactly this outcome: no concrete need for a standalone `v0.8`
+phase ever surfaced, so per that ADR's own contingency the roadmap collapses
+`v0.7` → `v0.9` directly rather than inventing content to fill the slot.
 
 **`v0.9` is NovaLake's terminus** — there is no `v0.10`. Serverless compute
 structurally can't expose infra-level Spark tuning (no Spark UI, no cluster

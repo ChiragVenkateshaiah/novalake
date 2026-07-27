@@ -41,17 +41,50 @@ catalog at ~1,000–4,000x the row count."
 
 ## Decision
 
-**Target scale**: 25,000,000 events as an upper bound to test toward, not a
-firm commitment — split proportionally to the current 63.4%/36.6% ndjson/
-multiline event ratio (16M ndjson / 9M multiline, ~25.4M once the ~1.5%
-duplicate-injection addition is counted). A small pilot batch (~1M events,
-same split) is generated and validated end-to-end first; the pilot's real
-cost-per-GB and cost-per-table-rebuild numbers set the final full-scale
-target, which may land materially lower (5–10M is an explicitly acceptable
-outcome) if Free Edition's daily compute quota — already observed to exhaust
-mid-session once on `v0.7` — doesn't support 25M once the `v0.9`
+**Target scale, revised after the pilot — see "Pilot results" below: ~5,000,000
+events, not the original 25,000,000 working estimate.** The original plan was
+25,000,000 events as an upper bound to test toward, not a firm commitment —
+split proportionally to the current 63.4%/36.6% ndjson/multiline event ratio
+(16M ndjson / 9M multiline, ~25.4M once the ~1.5% duplicate-injection
+addition is counted). A small pilot batch (~1M events, same split) was
+generated and validated end-to-end first, exactly as planned; the pilot's
+real cost-per-GB and cost-per-table-rebuild numbers are what set the final
+full-scale target below — landing materially lower than 25M (an explicitly
+acceptable outcome per the original plan) because Free Edition's daily
+compute quota — already observed to exhaust mid-session once on `v0.7` —
+doesn't comfortably support 25M once the `v0.9`
 medallion-rebuild cost (103 dbt models flipping from view to table
 materialization) is counted.
+
+**Pilot results (2026-07-27, gated run under ADR-0009)**: ~1.01M events
+(649,600 ndjson + 364,679 multiline, matching the ~640K/~360K targets plus
+expected duplicate-injection growth) ran end to end — generation, Bronze
+ingest, `dbt run`/`dbt test` at `is_gb_scale=true` — in ~8 minutes,
+`TERMINATED SUCCESS`. Correctness confirmed precisely, not approximately:
+`silver_gb.int_events_deduped` landed at exactly 640,000 rows (649,600 minus
+the exact 9,600 injected duplicates), confirming the chunked
+duplicate-injection tie-break fix (§2, `ingested_at + 1s`) resolves
+deterministically; `silver_gb.int_multiline_merchants` landed at exactly 100
+(the distinct merchant count) across 800 pages / 40 files, empirically
+confirming the "zero SQL changes" cross-page-resolution claim (§3) rather
+than just reasoning about it; defect ratios matched target almost exactly
+(sentinel timestamps 5.02% vs. 5% target, malformed risk field 2.98% vs. 3%
+target); measured bytes/event (~711 B ndjson, ~1,890 B multiline) landed
+within 1% of this ADR's original extrapolation. One live, expected finding:
+`bronze_gb` does not auto-create the way a DLT pipeline's declared schema
+does — a plain PySpark `saveAsTable()` requires the schema to already exist
+— fixed with a gated `CREATE SCHEMA IF NOT EXISTS novalake.bronze_gb` before
+the successful rerun.
+
+Extrapolating the pilot's ~8-minute runtime linearly to the original 25M
+target implied **~3.3 hours** for generation+ingest+dbt alone, before any of
+`v0.9`'s optimization experiments (each wanting its own further `dbt run`).
+Presented to Chirag as a real risk on two fronts — the daily compute quota,
+and Databricks job timeout ceilings (never checked against a run this long)
+— he chose **~5,000,000 events** (~40 minutes extrapolated) over ~10M or
+holding at 25M: enough scale to be genuinely multi-GB and produce real
+query-plan/file-layout characteristics (the actual point of this
+prerequisite), comfortably inside both the timeout and quota risk envelope.
 
 **Schema/landing layout**: UC schemas `novalake.bronze_gb`, `silver_gb`,
 `gold_gb` (matches `v0.7`'s `_dlt`-suffix precedent) — existing `bronze`/

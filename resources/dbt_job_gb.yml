@@ -25,8 +25,14 @@ resources:
           default: "20"     # pilot default; full run uses 200 (see ADR-0011 §3)
         - name: skew_merchant_ids
           default: "2"
-        - name: catalog
-          default: "${var.catalog}"
+      # catalog is intentionally NOT a job parameter: it never varies between
+      # pilot and full-scale runs, and dbt_task's catalog field rejected the
+      # {{job.parameters.catalog}} runtime-reference syntax outright
+      # ("illegal characters") on the first real deploy attempt -- that
+      # syntax is only valid inside task `parameters` string arrays, not
+      # dbt_task's own typed fields. Uses the same ${var.catalog} bundle
+      # variable resources/dbt_job.yml already uses instead, resolved by DAB
+      # at deploy time, everywhere below.
 
       tasks:
         # Generation tasks run in parallel (independent sources) -- peak
@@ -46,7 +52,7 @@ resources:
               - "--chunk-size"
               - "{{job.parameters.chunk_size}}"
               - "--out-dir"
-              - "/Volumes/{{job.parameters.catalog}}/bronze/landing/gb_scale/ndjson"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/ndjson"
               - "--skew-merchant-ids"
               - "{{job.parameters.skew_merchant_ids}}"
 
@@ -62,7 +68,7 @@ resources:
               - "--pages-per-file"
               - "{{job.parameters.pages_per_file}}"
               - "--out-dir"
-              - "/Volumes/{{job.parameters.catalog}}/bronze/landing/gb_scale/multiline"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/multiline"
               - "--skew-merchant-ids"
               - "{{job.parameters.skew_merchant_ids}}"
 
@@ -74,9 +80,9 @@ resources:
             python_file: ../src/ingest.py
             parameters:
               - "--catalog"
-              - "{{job.parameters.catalog}}"
+              - "${var.catalog}"
               - "--raw-path"
-              - "/Volumes/{{job.parameters.catalog}}/bronze/landing/gb_scale/ndjson/payments_events.json"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/ndjson/payments_events.json"
               - "--target-schema"
               - "bronze_gb"
               - "--no-verbose-count"
@@ -89,9 +95,9 @@ resources:
             python_file: ../src/ingest_multiline.py
             parameters:
               - "--catalog"
-              - "{{job.parameters.catalog}}"
+              - "${var.catalog}"
               - "--raw-path"
-              - "/Volumes/{{job.parameters.catalog}}/bronze/landing/gb_scale/multiline"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/multiline"
               - "--target-schema"
               - "bronze_gb"
               - "--no-verbose-count"
@@ -116,7 +122,7 @@ resources:
               # Confirmed live: 101 of 103 models selected with this filter.
               - "dbt run --vars \"{is_gb_scale: true}\" --exclude path:models/gold/genai"
               - "dbt test --vars \"{is_gb_scale: true}\" --exclude path:models/gold/genai"
-            catalog: "{{job.parameters.catalog}}"
+            catalog: "${var.catalog}"
             schema: "silver_gb"
             warehouse_id: "${var.warehouse_id}"
 

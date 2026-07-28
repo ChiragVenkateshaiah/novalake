@@ -1,7 +1,7 @@
 # Module 9 · Spark Optimization (Serverless-Constrained)
 
 `Status:` Draft — GB-scale full run complete and validated (2026-07-28);
-`§8` optimization experiments in progress (8.1, 8.2, 8.2b done) ·
+`§8` optimization experiments in progress (8.1, 8.2, 8.2b, 8.3 done) ·
 `Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:` multi-session
 
 **Scope, per [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md):**
@@ -43,7 +43,25 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
       (files read 8→1, bytes read ~118 MB→~12.9 MB) once a table is past the
       minimum-files-to-compact threshold — not just inferred it from
       `8.2`'s null result
-- [ ] `8.3`–`8.6` objectives — not yet reached
+- [x] Can find genuine (not artificial) file fragmentation by surveying
+      `DESCRIBE DETAIL` across candidate tables, and can detect whether
+      Predictive Optimization has already acted on a table using
+      `system.storage.predictive_optimization_operations_history` — a real
+      operations log, unlike `SHOW TBLPROPERTIES`, which shows nothing about
+      Predictive Optimization activity at all
+- [x] Can recognize when a query will be answered from Delta's file-level
+      metadata statistics alone (`LocalTableScan` in the plan, zero bytes
+      actually read) rather than a real physical scan — and knows this makes
+      such a query useless for measuring a file-layout change, regardless of
+      whether the query result cache is also a factor
+- [x] Can explain *why* file compaction improves a full, unfiltered scan
+      (fewer files → less per-file open/schedule overhead) as a mechanism
+      distinct from liquid clustering's data-skipping benefit for filtered
+      queries — and can tell the two apart from the shape of a before/after
+      result (compaction: files drop a lot, bytes barely move, duration drops
+      a lot; clustering: files *and* bytes both drop a lot for a filtered
+      query)
+- [ ] `8.4`–`8.6` objectives — not yet reached
 
 ## 2. Prerequisites
 - `v0.9`'s GB-scale regeneration (ADR-0011) complete and validated: `bronze_gb`/
@@ -106,6 +124,27 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   already-large file to split requires an explicit rewrite (e.g. an
   `INSERT OVERWRITE ... SELECT /*+ REPARTITION(n) */ ...`), not a property
   change plus a plain `OPTIMIZE` call.
+- **Predictive Optimization is genuinely active on this workspace — and
+  `SHOW TBLPROPERTIES` gives zero indication of it.** The only real evidence
+  is `system.storage.predictive_optimization_operations_history`, an actual
+  operations log (confirmed live: it had already run a `COMPACTION` on an
+  earlier version of `bronze_gb.raw_events_multiline` earlier the same day,
+  23→4 files). Check this table before trusting any `OPTIMIZE` before/after
+  comparison — if Predictive Optimization compacts a table between your
+  "before" measurement and your own `OPTIMIZE` call, your own `OPTIMIZE` will
+  look like a no-op when PO already did the work.
+- **Two separate confounds can make a query silently stop measuring what you
+  think it measures — neither is about clustering/compaction at all.**
+  (1) Delta can answer simple aggregates (`COUNT(*)`, `MAX(scalar_col)`)
+  straight from file-level metadata statistics, with **zero bytes read** —
+  visible in the plan as `LocalTableScan`. No file-layout change can ever
+  show up in such a query's metrics, because no file is ever opened. (2) The
+  SQL warehouse's query result cache can return an identical result for a
+  repeated query without re-scanning anything — set `use_cached_result =
+  false` for the session before any before/after comparison, and pick a
+  query shape (e.g. an aggregate over nested array content, not a bare
+  `COUNT(*)`) that forces a genuine `PhotonScan`, confirmed via `EXPLAIN`
+  before trusting the result.
 
 ## 5. Data Contract / Schema in Scope
 - `novalake.gold_gb.fct_transactions` — 2,138,809 rows, 21 columns, unclustered
@@ -116,6 +155,13 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   (`mer_1050` is a non-skewed merchant — 8,525 matching rows, ~0.4% of the
   table, consistent with ADR-0011's skew design where only `mer_1000`/
   `mer_1001` are deliberately hot)
+- `novalake.bronze_gb.raw_events_multiline` — 4,000 rows (one per multiline
+  "page"), 7 columns (deeply nested), 20 files at experiment start
+  (~11.1 MB avg, ~212 MB total), unclustered, from ingesting 20 separate
+  landing part-files. Representative query for `8.3`:
+  `SELECT count(*), sum(size(data.events)) FROM bronze_gb.raw_events_multiline`
+  (a full, unfiltered scan over nested array content — chosen specifically
+  because it can't be answered from Delta metadata alone, see §4)
 
 ## 6. Step-by-Step Implementation
 
@@ -263,18 +309,98 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
     step's finding, remember that plain compaction `OPTIMIZE` doesn't split
     large files, only merges small ones, when picking a technique.
 
-- **Steps 8.3–8.6** — not yet reached.
+- **Step 8.3 — `OPTIMIZE`/file compaction**
+  - *Objective:* find a table with genuine (not artificial) file
+    fragmentation and measure whether plain bin-packing `OPTIMIZE` (no
+    clustering) improves a full-scan query's cost.
+  - *Concept:* compaction's mechanism is different from clustering's — it
+    reduces *per-file overhead* for scans that touch most/all of a table
+    (fewer files → fewer open/close and task-scheduling costs), rather than
+    *skipping* files for a filtered query. A good candidate table needs many
+    small files, not a filter-worthy key.
+  - *Task:* surveyed `DESCRIBE DETAIL` across `bronze_gb` (the smallest,
+    fastest schema to check, and the plan's own suggested first look, since
+    Bronze ingest from many landing part-files is a likely small-files
+    source). `bronze_gb.raw_events` was unremarkable (4 files); `bronze_gb
+    .raw_events_multiline` had **20 files, ~11.1 MB average** — a genuine
+    small-files table, well past the 4-file compaction threshold `8.2b`
+    found. Checked `system.storage.predictive_optimization_operations_history`
+    before trusting anything: Predictive Optimization had already run a real
+    `COMPACTION` on an earlier version of this same table earlier the same
+    day (23→4 files, `2026-07-28T10:42:45Z`) — confirming PO is genuinely
+    active on this workspace (something `SHOW TBLPROPERTIES` gave zero
+    indication of), and that the current 20-file state postdated that event
+    with nothing since, so the "before" measurement was still clean. Acted
+    promptly given PO could compact it again at any time.
+  - **Two real methodology confounds found and fixed before trusting any
+    number, neither related to compaction itself:**
+    1. The first candidate query, `SELECT count(*), max(pagination.page)
+       FROM ...`, came back as `LocalTableScan` in `EXPLAIN` — **zero bytes
+       read** — even after disabling the query result cache
+       (`SET use_cached_result = false`). Delta answered it entirely from
+       file-level metadata statistics. No file-layout change could ever show
+       up in this query's metrics, cache or no cache.
+    2. Switched to `SELECT count(*), sum(size(data.events))
+       FROM bronze_gb.raw_events_multiline` — an aggregate over nested array
+       content, confirmed via `EXPLAIN` to produce a genuine `PhotonScan`
+       with no `RequiredDataFilters` (a real full scan). This is the query
+       used for both before/after measurements below.
+  - *Task (gated, ADR-0009):* `OPTIMIZE novalake.bronze_gb.raw_events_multiline`
+    — plain bin-packing, no `CLUSTER BY`/`ZORDER` (this table isn't
+    clustered; `8.3` tests compaction on its own, distinct from `8.2`/`8.2b`).
+  - *Expected output / observed:*
+    - Before: **4,000 rows, 20 files read, 219,241,796 bytes read (~209 MB,
+      nearly the whole 222 MB table — expected, no predicate means no
+      data-skipping is possible either way), 7,777 ms.**
+    - `OPTIMIZE` returned `numFilesAdded: 4, numFilesRemoved: 20` — a real
+      compaction, 20 small files merged into 4 larger ones
+      (`sizeInBytes` 222,287,073 → 208,346,802, slightly smaller from better
+      compression at larger file sizes).
+    - After: **4,000 rows (same), 4 files read, 202,334,925 bytes read
+      (~193 MB), 3,120 ms.**
+  - *Validation check:* `DESCRIBE DETAIL` before/after confirmed the
+    physical file-count/size change; row count and the `sum(size(...))`
+    aggregate value were identical before and after — correctness preserved,
+    only physical layout changed.
+  - **Conclusion — a real, causally-explainable improvement, unlike `8.2`'s
+    cache artifact:** files read dropped 80% (20→4), bytes read dropped only
+    7.7% (expected — no data-skipping applies to an unfiltered scan; the
+    small byte reduction is just better Parquet compression at larger file
+    sizes), and **duration dropped 60% (7,777 ms → 3,120 ms)**. Unlike `8.2`,
+    where bytes/files were unchanged and the duration drop was pure cache
+    warm-up, here both bytes *and* files genuinely changed — so there's a
+    real physical mechanism to attribute the duration improvement to (fewer
+    files means fewer file-open/close operations and less task-scheduling
+    overhead across the scan), not just a coincidence of running the query
+    twice.
+  - **Contrast with `8.2`/`8.2b`, worth stating plainly:** clustering helps a
+    *filtered* query by skipping files that don't match the predicate
+    (`8.2b`: files 8→1, bytes ~89% down). Compaction helps a *full-scan*
+    query by reducing per-file overhead (`8.3`: files 80% down, bytes barely
+    move, duration 60% down). Same general shape of test, two genuinely
+    different mechanisms — tell them apart by which of bytes/files moves
+    most in the result.
+
+- **Steps 8.4–8.6** — not yet reached.
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: `ALTER TABLE ... CLUSTER BY` and `OPTIMIZE`
   are both safe to re-run — `OPTIMIZE` is a no-op once a table is already
   compacted/clustered, and re-running it against `fct_transactions` right now
   would again report `numFilesAdded: 0` for the same reason.
-- Performance (the whole point of this module): see `8.1`/`8.2` above.
+- Performance (the whole point of this module): see `8.1`/`8.2`/`8.3` above.
   Measurement methodology going forward: wall-clock/rows via the fast Query
   History API immediately after each query; full bytes/files via a polling
   loop against `system.query.history` (30s interval, no fixed attempt count
-  assumed — freshness has no SLA).
+  assumed — freshness has no SLA); `SET use_cached_result = false` at the
+  start of every before/after session, and a query shape confirmed via
+  `EXPLAIN` to produce a real `PhotonScan` (not `LocalTableScan`) before
+  trusting any comparison.
+- **Predictive Optimization is live on this workspace.** Check
+  `system.storage.predictive_optimization_operations_history` for a
+  candidate table before any `8.x` before/after test, and act promptly once
+  a clean "before" state is confirmed — PO could compact/cluster a table in
+  the background at any time, and it leaves no trace in `SHOW TBLPROPERTIES`.
 
 ## 8. Data Quality & Governance
 - No new physical tables created by `8.1`/`8.2` (per ADR-0011's table-quota
@@ -296,7 +422,12 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 - [x] `8.2b`: clustering's real data-skipping effect directly observed on a
       disposable scratch copy once past the file-count threshold (files 8→1,
       bytes ~118 MB→~12.9 MB), scratch table confirmed dropped after
-- [ ] `8.3`–`8.6`: not yet run
+- [x] `8.3`: genuine fragmentation found via survey (not artificial), a real
+      compaction confirmed via `OPTIMIZE`'s own metrics and `DESCRIBE DETAIL`
+      diff (files 20→4), a real and causally-explained duration improvement
+      (60%, unlike `8.2`'s cache artifact) — Predictive Optimization activity
+      checked and accounted for before trusting the comparison
+- [ ] `8.4`–`8.6`: not yet run
 - [ ] All six ADR-0008 techniques have a recorded before/after result
 - [ ] `README.md` roadmap/Status updated; `v0.9` tagged — final steps, not yet
       reached
@@ -314,6 +445,21 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   directly on a scratch copy, not just theorized from documentation.
 - Bin-packing `OPTIMIZE` merges small files; it never splits large ones —
   a lower `delta.targetFileSize` alone does nothing to an already-large file.
+- Compaction and clustering fix different problems and show up differently
+  in a before/after: compaction (`8.3`) barely moves bytes for a full scan
+  but cuts duration a lot (less per-file overhead); clustering (`8.2b`) cuts
+  both bytes and files a lot for a filtered query (data-skipping). Reading
+  which metric actually moved tells you which mechanism is really at work.
+- Two confounds can silently invalidate a before/after comparison before
+  clustering/compaction ever enters the picture: Delta answering a query
+  from metadata alone (`LocalTableScan`, zero bytes read) and the query
+  result cache returning a stale-but-identical result. Check `EXPLAIN` for a
+  real `PhotonScan` and disable `use_cached_result` before trusting any
+  number.
+- Predictive Optimization is genuinely active on this workspace and
+  invisible to `SHOW TBLPROPERTIES` — the only real evidence is
+  `system.storage.predictive_optimization_operations_history`. Check it, and
+  move promptly once a clean "before" state is confirmed.
 
 ## 11. Knowledge Check
 - Q1: Why did `OPTIMIZE` report `numFilesAdded: 0` even though it ran
@@ -327,6 +473,13 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 - Q4: On the scratch table, files read dropped 87.5% and bytes read dropped
   89%, but duration only improved 11%. What does that gap tell you about
   what wall-clock time is actually measuring at this data scale?
+- Q5: `8.3`'s first candidate query (`count(*)`, `max(pagination.page)`)
+  showed `LocalTableScan` in its plan even with the result cache disabled.
+  Why didn't disabling the cache fix it, and what kind of query would?
+- Q6: `8.3` showed files drop 80% but bytes drop only 7.7%, while `8.2b`
+  showed both files *and* bytes drop by roughly the same large amount. What
+  does that difference tell you about which optimization — compaction or
+  clustering — actually ran in each case, without being told directly?
 
 ## 12. References
 - Internal: [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md),
@@ -343,3 +496,4 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 |------|--------|--------|
 | 2026-07-28 | Module created; `8.1` (baseline) and `8.2` (liquid clustering, a clean null result) documented | Chirag + Claude |
 | 2026-07-28 | `8.2b` added: empirical verification of `8.2`'s null result on a disposable scratch copy, forced past the file-count threshold — real clustering effect confirmed directly (files 8→1, bytes ~118 MB→~12.9 MB), plus a found-live sub-finding that bin-packing `OPTIMIZE` doesn't split large files | Chirag + Claude |
+| 2026-07-28 | `8.3` added: `OPTIMIZE`/file compaction on a genuinely fragmented table (`bronze_gb.raw_events_multiline`, 20 files). Found and fixed two real methodology confounds first (Delta metadata-only query answering, query result caching) and confirmed Predictive Optimization is genuinely active on this workspace (invisible to `SHOW TBLPROPERTIES`, visible in `system.storage.predictive_optimization_operations_history`). Real, causally-explained result: files 20→4, duration −60%, contrasted directly with `8.2`'s cache-artifact duration drop | Chirag + Claude |

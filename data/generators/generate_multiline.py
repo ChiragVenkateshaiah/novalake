@@ -60,6 +60,7 @@ output (payments_events_multiline_part_NNNNN.json) only kicks in once
 """
 
 import argparse
+import glob
 import json
 import math
 import os
@@ -552,6 +553,23 @@ def main():
     single_file = pages_per_file >= total_pages
 
     os.makedirs(args.out_dir, exist_ok=True)
+
+    # v0.9 fix (found running the full-scale job, 2026-07-28): page numbering
+    # restarts from 1 every run, but this directory's filenames don't -- a run
+    # producing fewer files than a PRIOR run at this same --out-dir (e.g. this
+    # run's 20 files at --pages-per-file 200 vs. an earlier pilot's 40 files at
+    # --pages-per-file 20) leaves that prior run's higher-indexed files on
+    # disk, untouched, still readable by Spark's directory scan alongside the
+    # new ones -- silently duplicating whatever page range they happen to
+    # share. Clear every prior part-file (and the single-file legacy name)
+    # before writing this run's output, so a directory always reflects
+    # exactly one run's data, never a blend of two.
+    stale = glob.glob(os.path.join(args.out_dir, "payments_events_multiline_part_*.json"))
+    stale += glob.glob(os.path.join(args.out_dir, "payments_events_multiline.json"))
+    for f in stale:
+        os.remove(f)
+    if stale:
+        print(f"Cleared {len(stale)} stale file(s) from a previous run at {args.out_dir}")
 
     total_events = total_pf = total_merch = total_cust = 0
     files_written = []

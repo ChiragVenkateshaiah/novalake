@@ -179,6 +179,17 @@
   - Evaluation approach (offline eval set, metrics, guardrails): ___
   - Serving surface (endpoint / app) & access control: ___
 
+### `Module 9 · Spark Optimization (Serverless-Constrained)`
+- 1 · 2 · 3 · 6 (one step per experiment) · 7 (performance is the whole point) · 9
+- Phase-specific blanks:
+  - Candidate table/key registry with rationale (why this table, why this key): ___
+  - Before/after measurement methodology (Query Profile via Query History API vs.
+    `system.query.history`, freshness caveats): ___
+  - What's explicitly out of scope per ADR-0008 (executor/shuffle tuning, cluster
+    sizing, disk cache, RDD caching — not reachable on serverless anyway): ___
+  - Which findings got folded back into permanent dbt config vs. stayed one-off
+    measurements: ___
+
 ### `Cross-Cutting · Governance, Observability, CI/CD`  *(running appendix, not a phase)*
 - Phase-specific blanks:
   - Unity Catalog: catalogs/schemas, tags, lineage, classifications: ___

@@ -2,7 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-07-27
-**Related:** [ADR-0008](0008-novalake-terminus-and-cerberus-succession.md), [ADR-0010](0010-v0.7-silver-not-gold-comparison-target.md)
+**Amended:** 2026-07-28 (pilot results; table-quota constraint + §8 in-place rule)
+**Related:** [ADR-0008](0008-novalake-terminus-and-cerberus-succession.md), [ADR-0009](0009-agentic-integration-mcp-gated-review-then-act.md), [ADR-0010](0010-v0.7-silver-not-gold-comparison-target.md)
 
 ## Context
 
@@ -157,6 +158,88 @@ scale — not forked per-model. Documented in full in the `v0.9` implementation
 plan (`docs/09-spark-optimization.md` once written), not repeated here since
 it's a mechanism, not an architectural decision on its own.
 
+**Table-quota constraint, discovered post-pilot (2026-07-27 evening
+warning, confirmed 2026-07-28) — updated in place, same as the pilot results
+above**: a live Databricks warning during the pilot flagged Unity Catalog
+approaching a per-schema table quota. Checked exactly, not just from the
+warning's "80%" framing, via the Resource Quotas API
+(`GET /api/2.1/unity-catalog/resource-quotas/schema/{schema}/table-quota`,
+read-only, ungated per ADR-0009):
+
+```
+novalake.silver_gb : quota_count=81, quota_limit=100
+novalake.gold_gb   : quota_count=20, quota_limit=100
+novalake.bronze_gb : quota_count=2,  quota_limit=100
+```
+
+**This is a genuine Free Edition-specific override, not the general Unity
+Catalog default.** Checked directly against Databricks' own published
+resource-limits table (`docs.databricks.com`/`learn.microsoft.com` — Azure
+and AWS docs agree): the standard quota is **10,000 tables/schema**,
+`Fixed: No` (requestable via an account team). Free Edition's own limitations
+page never states a lower number — this 100/schema ceiling is silently
+enforced, not documented publicly anywhere found. **No self-service or
+documented escalation path exists**: Free Edition has no account
+console/account-team relationship (`getting-started/free-edition-limitations`
+confirms "No access to the account console or account-level APIs") and is
+explicitly outside the Databricks support policy/SLA; the one Free-Edition-
+specific increase mechanism that does exist (LinkedIn identity verification)
+is documented as covering only serverless GPU compute and outbound internet
+access, not Unity Catalog quotas. An `help@databricks.com` request remains
+technically possible (see "Alternatives considered" below) but with no SLA
+for a free account. Treated here as a design constraint to build around now,
+not a blocker worth waiting on — re-verify both `quota_count` *and*
+`quota_limit` via the live API before relying on either number again, rather
+than assuming this write-up is still current.
+
+**Why this run stays safe**: table count tracks *model count*, not row
+count. The pilot already materialized the full applicable model set (101 of
+103 — `gold.genai` excluded per this ADR's own scope) at small scale — and
+`silver_gb`'s 81 + `gold_gb`'s 20 sums to exactly that 101, confirming the
+quota counts really do reflect the model set, not something else. The
+planned ~5M-event full run re-runs `dbt run --vars "{is_gb_scale: true}"`
+against those same 101 models, so it refreshes existing tables in place
+rather than creating new ones. `silver_gb`'s 19 remaining tables of headroom
+(gold_gb has 80) is the number that actually constrains `v0.9`'s next
+phase — the six §8 optimization experiments, not the full-scale run itself.
+
+**§8 design rule, adopted as a direct consequence of this constraint**:
+reviewing the existing (already Opus-reviewed) §8 experiment design against
+what each experiment's method actually specifies confirmed all five of
+8.1–8.5 already operate **in place**, no retrofit needed: 8.1 (baseline) is
+read-only `EXPLAIN`/Query Profile against a `SELECT`; 8.2 (liquid
+clustering) is `ALTER TABLE ... CLUSTER BY` + `OPTIMIZE` on the existing
+table, and the dbt `--select` rerun that later folds a win into permanent
+config replaces that same table rather than adding one; 8.3 (`OPTIMIZE`/file
+compaction) is `DESCRIBE DETAIL` + `OPTIMIZE`, also in place; 8.4 (join
+strategy) is query-scoped SQL hints, no persistence at all; 8.5 (skew) is
+`DESCRIBE DETAIL` on the already-clustered table plus a read-only notebook
+query. The one gap: 8.6 (UDF elimination) described its comparison as a
+"scratch query" without ruling out a persisted scratch table. Closed here:
+8.6's UDF-vs-native-SQL-macro comparison runs as two timed `SELECT`s against
+an existing `silver_gb` table (e.g. `int_transactions_clean`) — no
+`CREATE TABLE` needed for a wall-clock/`EXPLAIN` comparison. **This needs a
+forcing action to be a real comparison, not just a syntactic one**: a bare
+`SELECT udf(col) FROM ...` followed by `.count()` lets Spark prune the
+unused UDF output entirely, making both timings identical and the experiment
+worthless — use an aggregate that actually consumes the value (e.g.
+`count(distinct ...)` on the transformed column) or a `noop`-format write,
+so the UDF genuinely executes on every row in both the UDF and native-SQL
+runs. Standing rule for all of §8, not just 8.6: **no new physical table in
+`silver_gb` or `gold_gb`** (dbt-model or ad-hoc) unless an experiment doc
+names one explicitly as necessary — and if so, it is a gated action per
+ADR-0009 (which already names ad-hoc `DROP TABLE`/DDL as gated, per its
+`v0.7` amendment — e.g. the `events_deduped` dataset-type-conflict drop,
+`docs/checkpoint.md`'s 2026-07-27 entry), dropped immediately after the
+comparison completes. If a scratch table is ever genuinely unavoidable, it
+goes in `gold_gb` (80 headroom) over `silver_gb` (19 headroom) — that
+preference is the actual decision the executing session needs to make, not
+just a fact to know. A quota check via the API above is a cheap, read-only
+step to run again immediately before §8 starts, and again after any
+exception scratch table is created — verify live, don't assume the numbers
+above still hold once further sessions add tables elsewhere in the same
+schemas.
+
 ## Consequences
 
 - Two new generator CLIs exist (`--n-events`/`--seed`/`--chunk-size`/
@@ -173,15 +256,22 @@ it's a mechanism, not an architectural decision on its own.
   defect catalog at the new scale and file layout, per `CLAUDE.md`'s raw-data
   policy (generator scripts and data dictionaries are version-controlled;
   raw JSON is not).
-- The final full-scale event count is not fixed by this ADR — it's set by
-  the pilot's measured cost, within the 25M upper bound justified above. A
-  materially lower number than 25M is an anticipated, acceptable outcome,
-  not a failure to hit target.
+- The final full-scale event count was set by the pilot's measured cost, not
+  fixed in advance by this ADR: ~5,000,000, materially below the 25M upper
+  bound justified above — the anticipated, acceptable "pilot-informed lower
+  number" outcome the original decision explicitly allowed for, not a miss
+  against target.
 - Deliberate skew injection is a new, additive generator behavior with no
   precedent in this codebase before now — recorded here rather than treated
   as an incidental side effect of "preserving existing ratios," since it
   isn't preserving anything, it's adding something new for a specific,
   named `v0.9` purpose.
+- `silver_gb`'s narrow headroom (19 tables, at the 2026-07-28 reading, against
+  the 100/schema Free Edition quota) is a standing constraint on every
+  future `v0.9` session, not just a one-time check — §8's in-place-only rule
+  above and the before-and-after quota-check step apply to every experiment,
+  including ones not yet designed in detail (8.6's follow-on work, any
+  future ADR-0012 content). Re-read live each time; don't treat 19 as fixed.
 
 ## Alternatives considered
 
@@ -214,3 +304,28 @@ it's a mechanism, not an architectural decision on its own.
   bound to test toward, with a pilot-informed lower number as an accepted
   outcome, is more honest than committing to a number this ADR can't
   actually guarantee is affordable.
+- **Request a Unity Catalog table-quota increase from Databricks for
+  `silver_gb`/`gold_gb` rather than designing §8 around the existing
+  100/schema cap.** Rejected — checked directly, not assumed: Free Edition
+  has no account console/account-team relationship and is explicitly
+  outside Databricks' support policy/SLA (`getting-started/free-edition-limitations`);
+  the one documented Free-Edition quota-increase path (LinkedIn identity
+  verification) is scoped to GPU compute and outbound internet, not Unity
+  Catalog quotas. An `help@databricks.com` request is possible but carries
+  no SLA for a free account. Designing §8 to stay in-place (see the
+  table-quota constraint subsection above) is a real fix available today,
+  versus an uncertain-outcome request with no committed timeline.
+- **Copy tables into a scratch/comparison schema for each §8 experiment's
+  before/after measurement, keeping `silver_gb`/`gold_gb` themselves
+  untouched during experimentation.** Rejected — not because it would
+  consume `silver_gb`/`gold_gb` table-quota headroom (the quota is
+  per-schema, so a dedicated scratch schema would get its own fresh 100 and
+  cost this specific budget nothing), but for two other reasons that hold
+  regardless: the already-Opus-reviewed §8 methodology already gets a valid
+  before/after by measuring the same table sequentially (`DESCRIBE
+  DETAIL`/`EXPLAIN` before → `ALTER`/`OPTIMIZE` → measure again), so copies
+  add no measurement value; and copying tables that are multi-GB at this
+  scale would burn real time against Free Edition's daily *compute* quota —
+  the actually-binding constraint this project has already hit once
+  (`v0.7`'s Experiment 2) — for no benefit, plus a new UC schema is itself a
+  gated object (per ADR-0009) needing its own creation and cleanup.

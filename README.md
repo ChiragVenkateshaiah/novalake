@@ -93,10 +93,17 @@ novalake/
 ├── CLAUDE.md              # repo-aware conventions + agentic-access rules (from v0.6)
 ├── databricks.yml         # Asset Bundle root — dev target only, no prod (see ADR-0007)
 ├── resources/
-│   └── dbt_job.yml        # bronze ingest task -> dbt_task (Silver/Gold)
+│   ├── dbt_job.yml        # bronze ingest task -> dbt_task (Silver/Gold)
+│   ├── dashboard.yml      # AI/BI dashboard on Gold (v0.4)
+│   ├── vector_search.yml  # RAG endpoint + indexes (v0.6)
+│   ├── dlt_pipeline.yml   # Declarative Pipelines comparison (v0.7)
+│   └── dbt_job_gb.yml     # GB-scale medallion rebuild, parameterized (v0.9)
 ├── src/
 │   ├── ingest.py           # PySpark: land + flatten the raw JSON (Bronze)
-│   └── dbt/                # dbt project: Silver/Gold models + tests
+│   ├── dbt/                # dbt project: Silver/Gold models + tests
+│   └── genai/               # RAG agent, eval, deploy/teardown scripts (v0.6)
+├── pipelines/
+│   └── transformations/    # Lakeflow Declarative Pipelines SQL (v0.7, comparative)
 ├── dbt_profiles/
 │   └── profiles.yml       # env_var()-based, local dbt dev only
 ├── requirements-dbt.txt   # dbt-databricks pin, local dev only
@@ -108,18 +115,15 @@ novalake/
 │   ├── checkpoint.md      # pinned process decisions (e.g. agentic integration timing)
 │   ├── _skeleton.md        # reusable doc module template
 │   ├── adr/                # one-decision-per-file architecture records
-│   └── 00-setup.md, ...    # one filled module per phase, incl. 06-genai.md
-├── pipelines/             # Lakeflow Declarative Pipeline source (from v0.7, comparative)
+│   ├── notes/               # ad-hoc reference notes (e.g. a v0.6 UI walkthrough)
+│   └── 00-setup.md, ...    # one filled module per phase, through 09-spark-optimization.md (v0.9)
 └── .github/workflows/     # CI (from v0.5, deploys via service principal)
 ```
-`pipelines/` isn't created yet — added when `v0.7` starts, not pre-scaffolded.
-`.github/workflows/` was added at `v0.5` (CI/CD), same principle. A `v0.6`
-GenAI source location (e.g. `src/genai/`) and its DAB resource file(s) (e.g.
-`resources/vector_search.yml`) are likewise not pre-scaffolded — `v0.6` is
-currently in the scoping stage (`docs/06-genai.md`, `docs/adr/0009-*.md`);
-build artifacts get added when that work actually starts. See
-`docs/checkpoint.md` for the DAB/dbt timing decisions and why `pipelines/`
-moved from `v0.6` to a later comparative phase.
+Each phase's directories/resource files were added when that phase actually
+started, not pre-scaffolded ahead of time — `pipelines/` at `v0.7`,
+`src/genai/`/`resources/vector_search.yml` at `v0.6`, `.github/workflows/`
+at `v0.5`. See `docs/checkpoint.md` for the reasoning behind that
+discipline and the DAB/dbt sequencing decisions.
 
 ## Status
 
@@ -156,19 +160,82 @@ succeeded, deploying to the existing `dev` job/dashboard in place (verified
 directly in the workspace UI, no parallel copies). See
 [`docs/05-cicd.md`](docs/05-cicd.md).
 
-🚧 `v0.6` GenAI in progress — scoping merged to `main`
-([PR #6](https://github.com/ChiragVenkateshaiah/novalake/pull/6)):
+✅ `v0.6` GenAI complete and merged to `main`, tagged `v0.6` — scoping
+([PR #6](https://github.com/ChiragVenkateshaiah/novalake/pull/6)) established
 [ADR-0009](docs/adr/0009-agentic-integration-mcp-gated-review-then-act.md)
-(Claude may invoke Databricks MCP actions directly from `v0.6` on, gated
-by per-action review — the checkpoint's `v0.6` re-open, fulfilled), a new
-root `CLAUDE.md`, and `docs/06-genai.md` scaffolded with RAG built before
-text-to-SQL, one `v0.6`. RAG build underway on `feat/v0.6-genai` (not yet
-merged): `fct_support_tickets.description` and `fct_reviews.title`/`body`
-promoted to Gold as the RAG corpus (no PII, verified against generator
-source and live data); two new physical Delta tables
-(`rag_support_ticket_corpus`, `rag_review_corpus`) since Gold's other
-models are views and Vector Search needs a table; two live, validated
-Vector Search indexes on a shared `novalake-rag` endpoint — `rag_support_
-ticket_index` (1255/1255 rows) and `rag_review_index` (1034/1034 rows),
-both retrieval-tested with real queries. See
-[`docs/06-genai.md`](docs/06-genai.md).
+(Claude may invoke Databricks MCP actions directly from `v0.6` on, gated by
+per-action review — the checkpoint's `v0.6` re-open, fulfilled). Two step-
+groups, both shipped: **RAG** (`fct_support_tickets.description` and
+`fct_reviews.title`/`body` promoted to Gold as the corpus, two new physical
+Delta tables synced via a shared `novalake-rag` Vector Search endpoint, a
+custom MLflow `ResponsesAgent` deployed to Model Serving, offline-evaluated
+— a real prompt-injection vulnerability was found and fixed via manual
+trace auditing) and **text-to-SQL** (an Agent Bricks Supervisor Agent
+routing to the existing Genie space; found and documented that certified-
+example SQL reuse is non-deterministic, a genuine Genie limitation, not a
+regression). See [`docs/06-genai.md`](docs/06-genai.md) and
+[`docs/notes/assistant-notes.md`](docs/notes/assistant-notes.md) for a UI
+walkthrough of everything built.
+
+✅ `v0.7` Declarative Pipelines complete and merged to `main`, tagged `v0.7`
+— re-implemented the `transaction.*`/ndjson Silver slice
+(`stg_raw_events → int_events_deduped → int_transactions →
+int_transactions_clean`/`int_transactions_dlq`) in Lakeflow Declarative
+Pipelines SQL, comparing directly against the existing dbt implementation
+in parallel `_dlt`-suffixed schemas — a deliberate retarget from Gold to
+Silver, see [ADR-0010](docs/adr/0010-v0.7-silver-not-gold-comparison-target.md).
+Two genuine empirical findings, both resolved live rather than assumed:
+DLT rejects `ROW_NUMBER()` on a streaming table outright
+(`NON_TIME_WINDOW_NOT_SUPPORTED_IN_STREAMING`), resolving a real conflict
+between the DLT skill's own example and the general Spark streaming rule;
+and `EXPECT ... ON VIOLATION DROP ROW` cannot produce an inspectable DLQ —
+confirmed by triggering a real 150-row violation and finding the event log
+exposes only an aggregate count, never row content — so dbt's `_clean`/
+`_dlq` two-model split does something DLT's own headline primitive
+genuinely can't replace. Exact row-count, content, and expectation parity
+against the dbt original on every check. See
+[`docs/07-declarative-pipelines.md`](docs/07-declarative-pipelines.md).
+
+✅ `v0.9` Spark Optimization complete, tagged `v0.9` — **NovaLake's
+terminus, no `v0.10`.** GB-scale regeneration first
+([ADR-0011](docs/adr/0011-gb-scale-data-regeneration.md)): both generators
+rewritten for bounded-memory chunked/streaming output (a new
+`--skew-merchant-ids` knob added to both), ~5,000,000 events landed across
+`bronze_gb`/`silver_gb`/`gold_gb` (revised down from an original 25M target
+after a pilot run's real cost-per-GB measurement), all 101 applicable dbt
+models rebuilt against the full-scale data. A real generator bug surfaced
+and fixed along the way: the multiline generator never cleared its output
+directory between runs, so a full-scale run silently picked up 20 stale
+pilot-scale files alongside its own, corrupting `fct_transactions` with
+122,592 duplicate keys — root-caused via direct file listing, fixed
+permanently, remediated via a scoped local `dbt` rebuild. Confirmed live
+that Unity Catalog's 100-table/schema quota is a genuine,
+practically-non-raisable Free Edition override of the general 10,000/schema
+default (ADR-0011 addendum).
+
+Then `§8`'s six ADR-0008-named optimization techniques, each with a real,
+evidence-backed before/after result (see
+[`docs/09-spark-optimization.md`](docs/09-spark-optimization.md)): liquid
+clustering showed a clean null result on the real (2-file) `fct_transactions`
+and a clean win once forced past the file-count threshold on a scratch copy
+(files 8→1, bytes −89%); `OPTIMIZE`/file compaction cut a genuinely
+fragmented Bronze table's files 20→4 with a real, causally-explained 60%
+duration drop; join strategy confirmed Spark's own default (broadcast/
+shuffle-hash) already beats any forced alternative, with `MERGE`/
+`SortMergeJoin` falling out of Photon acceleration entirely; skew handling
+quantified a real clustering failure under deliberate skew
+(`approxClusteringQuality: 0.0`), honestly reported as a partly-unresolved
+open question after three follow-up attempts didn't unstick it; UDF
+elimination showed a constructed Python UDF running ~2.6x slower than the
+native SQL macro it mirrors, forcing the *entire* downstream query plan out
+of Photon, not just the UDF step. Both deliberately-constructed pedagogical
+artifacts (the skew knob, the demonstration UDF) are formally recorded in
+[ADR-0012](docs/adr/0012-deliberate-skew-and-udf-antipattern-injection.md).
+Real platform-methodology findings along the way, reusable for future work:
+`system.query.history` has no documented freshness SLA; the SQL result
+cache matches on logical result equivalence, not literal query text,
+requiring an explicit session to reliably bypass; Predictive Optimization is
+genuinely active on this workspace despite being invisible to
+`SHOW TBLPROPERTIES`. See
+[`docs/09-spark-optimization.md`](docs/09-spark-optimization.md) for the
+full technical narrative.

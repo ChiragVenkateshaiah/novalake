@@ -1,9 +1,8 @@
 # Module 7 · Declarative Pipelines (DLT vs. dbt Comparison)
 
-`Status:` Draft — build and validation complete, Experiment 2 (DLQ event-log
-recoverability) blocked by a Free Edition daily compute-quota exhaustion,
-deferred to next session · `Owner:` Chirag · `Last updated:` v0.7 (in
-progress, 2026-07-27) · `Est. time:` ~1 day
+`Status:` Complete — build, validation, and Experiment 2 all done ·
+`Owner:` Chirag · `Last updated:` v0.7 (module complete, 2026-07-27) ·
+`Est. time:` ~1 day
 
 **Scope decision (recorded formally in [ADR-0010](adr/0010-v0.7-silver-not-gold-comparison-target.md),
 not silently redefined here):** ADR-0002 originally scoped this module as
@@ -31,10 +30,12 @@ Changelog for what each pass changed.
       VIOLATION DROP ROW` and dbt's `_clean`/`_dlq` two-model pattern for
       quarantining bad rows, and why one of them (not both) leaves an
       inspectable trail of *which rows* were rejected
-- [ ] Can state, from an actual triggered violation (not documentation
+- [x] Can state, from an actual triggered violation (not documentation
       alone), whether a dropped row's content is recoverable from the DLT
-      pipeline event log — **blocked this session by a platform compute
-      limit, not yet checked live; see §9 and §Changelog**
+      pipeline event log — **confirmed live: no.** The event log's
+      `data_quality.expectations` exposes only an aggregate count
+      (`failed_records`); the scratch table itself contains exactly the
+      passing rows, nothing from the 150 dropped ones. See §6 Step 7.6.
 - [x] Can explain why `Auto Loader`'s `STREAM read_files()` structurally
       cannot target a single literal file, even an unambiguous one, and what
       minimal fix (a one-character glob) restores the original intent
@@ -218,28 +219,44 @@ Changelog for what each pass changed.
   - *Task:* see §9 for the full results table.
   - *Validation check:* all green — see §9.
 
-- **Step 7.6 — Experiment 2: DLQ event-log recoverability (blocked)**
+- **Step 7.6 — Experiment 2: DLQ event-log recoverability (complete)**
   - *Objective:* empirically confirm — not just cite documentation — whether
     a dropped row's content is recoverable from the DLT event log after an
     `EXPECT ... ON VIOLATION DROP ROW` violation.
   - *Task:* presented and got go-ahead for a scratch table
     (`novalake.silver_dlt._scratch_dlq_test`, `CONSTRAINT test_drop EXPECT
     (event_timestamp_quality = 'ok') ON VIOLATION DROP ROW`, a predicate with
-    a confirmed-live 150-row violation count). Deployed successfully; the
-    triggered run failed immediately with:
+    a confirmed-live 150-row violation count). First attempt (same session
+    the row-count/content parity checks were run) deployed successfully but
+    the triggered run failed immediately with `RESOURCE_EXHAUSTED: ... you
+    have hit your free daily limit` — confirmed account-wide, not
+    pipeline-specific, since the SQL warehouse itself began rejecting
+    ordinary `execute_sql` queries with the same underlying cause
+    immediately after. Deferred; scratch file removed, pipeline redeployed
+    without it in the interim.
+  - **Result, once the daily quota reset (later session, same day)**:
+    recreated the scratch file, redeployed, and reran. The flow completed
+    (`novalake.silver_dlt._scratch_dlq_test` reached `COMPLETED`,
+    `num_output_rows: 3042`). The event log's `data_quality.expectations`
+    for this flow reported exactly:
     ```
-    RESOURCE_EXHAUSTED: Sorry, cannot run the resource because you have hit
-    your free daily limit. Please come back again tomorrow.
+    {"name": "test_drop", "dataset": "novalake.silver_dlt._scratch_dlq_test",
+     "passed_records": 3042, "failed_records": 150}
     ```
-    Confirmed this is an account-wide Free Edition daily compute cap, not a
-    pipeline-specific issue — the SQL warehouse itself began rejecting
-    ordinary `execute_sql` queries with the same underlying cause immediately
-    after. Removed the scratch file from the repo and redeployed the
-    pipeline definition without it (a control-plane-only `bundle deploy`,
-    which succeeded — confirming the cap blocks compute execution, not the
-    deploy API). **Not run this session; deferred to next session once the
-    daily quota resets** — see Changelog and `docs/checkpoint.md`'s
-    2026-07-27 entries for the full trail.
+    — an aggregate count only, no row-level fields anywhere in the event
+    payload (no `event_id`, no dropped-row content, no sample). Cross-checked
+    directly against the scratch table itself:
+    `SELECT count(*) FROM novalake.silver_dlt._scratch_dlq_test` returned
+    exactly 3,042, all with `event_timestamp_quality = 'ok'` — the 150
+    dropped rows are genuinely gone, not retained anywhere queryable.
+    **Conclusion, now empirically confirmed rather than documentation-sourced:
+    `EXPECT ... ON VIOLATION DROP ROW` cannot produce an inspectable DLQ.**
+    dbt's `_clean`/`_dlq` two-model `WHERE`-split — mechanically
+    unglamorous, but genuinely doing something DLT's own headline
+    expectation primitive cannot — is confirmed necessary, not just
+    convention. Cleanup: `DROP TABLE
+    novalake.silver_dlt._scratch_dlq_test` (gated, executed), scratch file
+    removed from the repo, pipeline redeployed clean.
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: streaming ingestion (`raw_events`) is
@@ -274,19 +291,21 @@ Changelog for what each pass changed.
   `risk_score_present`/`resolved_ts_present_when_ok` (all `FAIL UPDATE`),
   `currency_known` (implicit warn, the direct DLT analog of dbt's `severity:
   warn` `accepted_values` test).
-- Quarantine / reject handling: **the central finding of this module.**
+- Quarantine / reject handling: **the central finding of this module, now
+  confirmed empirically, not just from documentation.**
   `EXPECT ... ON VIOLATION DROP ROW` was deliberately *not* used for the
   `transactions_clean`/`transactions_dlq` split — both the bundled DLT
   skill's own docs and Databricks' official docs state that dropped-row
   *content* is not recoverable from the event log, only aggregate violation
-  counts per constraint. The two-table `WHERE event_timestamp_quality =
-  'ok'` / `!= 'ok'` split — mechanically identical to dbt's `_clean`/`_dlq`
-  pair — is DLT's own documented workaround for needing an inspectable
-  quarantine. **This finding is still sourced from documentation, not yet
-  independently confirmed live** — Experiment 2 (Step 7.6), designed to
-  verify it empirically, was blocked by the Free Edition daily compute quota
-  before it could run. Treat the "not recoverable" claim as documentation-
-  sourced and pending live confirmation until Experiment 2 completes.
+  counts per constraint. Experiment 2 (Step 7.6) triggered a real 150-row
+  violation on a scratch table and confirmed exactly that: the event log's
+  `data_quality.expectations` exposed only `{"passed_records": 3042,
+  "failed_records": 150}` — no row-level content whatsoever — and the
+  scratch table itself held only the 3,042 passing rows. The two-table
+  `WHERE event_timestamp_quality = 'ok'` / `!= 'ok'` split — mechanically
+  identical to dbt's `_clean`/`_dlq` pair — is confirmed as DLT's only way
+  to get an inspectable quarantine; `EXPECT ... DROP ROW` genuinely cannot
+  substitute for it.
 - **Dedup-correctness gap, a genuine DLT capability gap, not a workaround
   needed:** dbt's `unique`+`not_null` test on `int_transactions.event_id` —
   the one test that actually validates the dedup step worked, not just
@@ -343,12 +362,11 @@ Changelog for what each pass changed.
       (`silver.int_transactions`) and DLT (`silver_dlt.transactions`) sides
       identically; 90 is the `_clean`-only count, also identical on both
       sides. A grain-scoping clarification, not a discrepancy.
-- [ ] Experiment 2 (DLQ event-log row-content recoverability): **not run —
-      blocked by Free Edition daily compute quota exhaustion.** Deferred to
-      next session; see §6 Step 7.6 and Changelog.
-- [ ] Sign-off: **pending** — this module is not tagged `v0.7` yet.
-      `CONTRIBUTING.md`'s Definition of Done requires a green validation
-      checklist before tagging; Experiment 2 is the one open item.
+- [x] Experiment 2 (DLQ event-log row-content recoverability): **confirmed
+      live — not recoverable.** Event log exposed only an aggregate count
+      (`passed_records: 3042, failed_records: 150`); the scratch table
+      contained exactly the 3,042 passing rows. See §6 Step 7.6.
+- [x] Sign-off: green — all validation criteria met, ready to tag `v0.7`.
 
 ## 10. Key Takeaways
 - Live testing surfaced three real build-time findings documentation alone
@@ -370,8 +388,10 @@ Changelog for what each pass changed.
   `from_json`/`try_cast`/macro-equivalent-`CASE` translate almost verbatim.
 - Where dbt's less "declarative-looking" pattern (`_clean`/`_dlq` two-model
   WHERE-split) turns out to be doing something DLT's own headline primitive
-  (`EXPECT ... DROP ROW`) genuinely can't replace for this need — pending
-  final live confirmation via Experiment 2.
+  (`EXPECT ... DROP ROW`) genuinely can't replace for this need — confirmed
+  live via Experiment 2, not just cited from documentation: a triggered
+  150-row violation left zero row-level trace anywhere queryable, only an
+  aggregate count.
 
 ## 11. Knowledge Check
 - Q1: Why does `ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY ...)`
@@ -403,4 +423,5 @@ Changelog for what each pass changed.
 | 2026-07-27 | Second Opus review pass (against the Silver-scoped revision) found 10 more issues — most significantly the unqualified Silver DDL (would've deployed into the wrong schema), the "acceptance ≠ correctness" gap in Experiment 1's framing, the ADR-0002 deviation belonging in a new ADR rather than `checkpoint.md`, a missed `schemaHints` column, an unguaranteed-violation scratch predicate, a missing dedup-uniqueness test mapping, a tautological Gold cross-check, and gated-action-list/`--select` gaps — all folded in before execution began. | Claude (Sonnet 5) + Opus 5 review |
 | 2026-07-27 | ADR-0010 drafted and accepted; ADR-0002/`docs/adr/README.md` amended; `CLAUDE.md`/`CONTRIBUTING.md` gated-action/DoD lists amended; all 5 pipeline SQL files and `resources/dlt_pipeline.yml` written. | Claude (Sonnet 5) |
 | 2026-07-27 | First deploy/run (gated, ADR-0009): hit and fixed the `read_files` literal-file-path rejection; Experiment 1 (streaming dedup) rejected live, fell back to materialized view; hit and fixed `CANNOT_CHANGE_DATASET_TYPE` via a gated `DROP TABLE`. Final run succeeded end to end. | Claude (Sonnet 5), gated actions approved by Chirag |
-| 2026-07-27 | §9 validation run: exact row-count/content/expectation parity across every check; 94-vs-90 grain discrepancy investigated and resolved (not a bug). Experiment 2 (DLQ event-log recoverability) presented, approved, and deployed, but blocked at run time by Free Edition's daily compute quota (`RESOURCE_EXHAUSTED`) — confirmed account-wide via the SQL warehouse also failing; deferred to next session. Module left untagged pending this one open item. | Claude (Sonnet 5), gated action approved by Chirag |
+| 2026-07-27 | §9 validation run: exact row-count/content/expectation parity across every check; 94-vs-90 grain discrepancy investigated and resolved (not a bug). Experiment 2 (DLQ event-log recoverability) presented, approved, and deployed, but blocked at run time by Free Edition's daily compute quota (`RESOURCE_EXHAUSTED`) — confirmed account-wide via the SQL warehouse also failing; deferred. Module left untagged pending this one open item. | Claude (Sonnet 5), gated action approved by Chirag |
+| 2026-07-27 | **Experiment 2 completed once the daily quota reset, same day.** Recreated the scratch table, redeployed, reran — flow `COMPLETED`. Confirmed empirically: the event log's `data_quality.expectations` exposes only an aggregate count (`passed_records: 3042, failed_records: 150`), no row-level content; the scratch table itself held exactly the 3,042 passing rows. `EXPECT ... ON VIOLATION DROP ROW` cannot produce an inspectable DLQ — dbt's `_clean`/`_dlq` split is confirmed necessary, not just conventional. Cleaned up (`DROP TABLE`, gated; scratch file removed; pipeline redeployed clean). Module status: Complete, all validation criteria green, ready to tag. | Claude (Sonnet 5), gated actions approved by Chirag |

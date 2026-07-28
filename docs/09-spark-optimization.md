@@ -1,8 +1,9 @@
 # Module 9 · Spark Optimization (Serverless-Constrained)
 
 `Status:` Draft — GB-scale full run complete and validated (2026-07-28);
-`§8` optimization experiments in progress (8.1, 8.2, 8.2b, 8.3, 8.4 done) ·
-`Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:` multi-session
+`§8` optimization experiments in progress (8.1, 8.2, 8.2b, 8.3, 8.4, 8.5
+done) · `Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:`
+multi-session
 
 **Scope, per [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md):**
 "Spark optimization within serverless constraints, capped deliberately at the
@@ -83,7 +84,22 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
       large (80 MB, 4.6M-row) shuffle isn't a measurement bug — it means no
       data crossed the network, consistent with this workspace's serverless
       warehouse running on few enough nodes that "shuffle" stays local
-- [ ] `8.5`–`8.6` objectives — not yet reached
+- [x] Can quote and interpret `approxClusteringQuality` — a real, returned
+      metric, not something inferred — and knows a value of exactly `0.0`
+      means the clustering pass achieved zero meaningful key separation,
+      confirmable directly by checking which files each key's rows actually
+      landed in (`_metadata.file_path`)
+- [x] Can explain the skew/compaction interaction found live: a clustering
+      pass on heavily-skewed data can compact a table down to very few files
+      *and* fail to separate keys in the same pass — and once file count
+      drops back below the compaction threshold, further `OPTIMIZE` calls
+      (even `OPTIMIZE ... FULL`, even with a much smaller target file size
+      and more files available) may simply decline to rewrite anything
+      further, for reasons this session could not fully resolve
+- [x] Knows when to stop chasing a platform internal and report a finding as
+      genuinely inconclusive, rather than either fabricating an explanation
+      or silently dropping the result
+- [ ] `8.6` objectives — not yet reached
 
 ## 2. Prerequisites
 - `v0.9`'s GB-scale regeneration (ADR-0011) complete and validated: `bronze_gb`/
@@ -194,6 +210,23 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   warehouse runs on few enough nodes that shuffle exchanges stay local,
   never crossing the network. Consistent with ADR-0008's broader
   limited-infra-visibility theme for this platform.
+- **`approxClusteringQuality` is a real, returned metric — read it, don't
+  infer clustering success from file count alone.** `8.2b`'s clean result
+  scored `0.784`; `8.5`'s heavily-skewed result scored exactly `0.0`, and
+  that number was independently confirmed by directly querying which files
+  each merchant ID's rows landed in (`_metadata.file_path`) — every ID,
+  including the two deliberately-hot ones, had its rows split almost evenly
+  across all resulting files. A 0.0 score means *zero* keys got separated,
+  not just the skewed ones.
+- **Clustering skewed data can compact a table down to too few files to
+  ever improve further.** `8.5`'s clustering pass merged 8 fragmented files
+  into just 2 — and 2 is below the 4-file compaction threshold `8.2b` found.
+  Once that happens, further `OPTIMIZE` calls may simply decline to act
+  (`numFilesAdded: 0`), even with a much smaller target file size and more
+  files available (tried: a second plain `OPTIMIZE`, a smaller
+  `delta.targetFileSize` with 11 files present, and `OPTIMIZE ... FULL` —
+  none rewrote anything). This wasn't fully root-caused — reported as a
+  genuine open question, not a fabricated explanation.
 
 ## 5. Data Contract / Schema in Scope
 - `novalake.gold_gb.fct_transactions` — 2,138,809 rows, 21 columns, unclustered
@@ -220,6 +253,15 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   from the first by filter), staying within the ndjson source per this
   project's guardrail against joining ndjson/multiline identifiers across
   sources
+- `8.5`'s skew candidate: a disposable scratch copy of `fct_transactions`
+  (real skewed data preserved — `mer_1000`/`mer_1001` at ~60% combined
+  share, per ADR-0011's deliberate `--skew-merchant-ids` injection), forced
+  past the compaction threshold the same way as `8.2b`, then clustered by
+  `merchant_id` for real. Bonus candidate:
+  `bronze_gb.raw_events_multiline`'s `reference_data.merchants` array,
+  exploded — 240,203 raw merchant-reference rows across only 100 distinct
+  `merchant_id`s, the source of `int_multiline_merchants`' cross-page
+  resolution window
 
 ## 6. Step-by-Step Implementation
 
@@ -527,7 +569,68 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
     specifically costs the most, compounded by a real Photon-acceleration
     loss on this platform, not just theoretical shuffle/sort overhead.
 
-- **Steps 8.5–8.6** — not yet reached.
+- **Step 8.5 — Skew handling**
+  - *Objective:* observe the real effect of deliberate transaction-level
+    skew (`mer_1000`/`mer_1001` at ~60% combined share) on liquid
+    clustering, on the warehouse (primary framing per `8.0`) — no config
+    toggling required, per the plan's own wording.
+  - *Concept:* the plan assumed `fct_transactions` was already usefully
+    clustered from `8.2` and just needed observing. It wasn't — `8.2`'s
+    `OPTIMIZE` was a no-op (2 files, below the 4-file threshold), so the
+    real table has clustering metadata set but no physical reorganization to
+    observe. Reused `8.2b`'s scratch-copy-plus-forced-fragmentation recipe,
+    this time to study skew specifically rather than clustering-in-general.
+  - *Task (gated, ADR-0009):* disposable scratch copy of `fct_transactions`
+    (`CREATE TABLE ... AS SELECT *`, exact 1:1, preserving the real skew),
+    forced to 8 files via `INSERT OVERWRITE ... REPARTITION(8)` (confirmed
+    unchanged row count: 2,138,809), then `ALTER TABLE ... CLUSTER BY
+    (merchant_id)` + `OPTIMIZE`.
+  - *Expected output / observed:* `OPTIMIZE` returned `numFilesAdded: 2,
+    numFilesRemoved: 8` — a real rewrite, 8 files merged into 2 — but
+    **`approxClusteringQuality: 0.0`**, sharply different from `8.2b`'s
+    clean `0.784` on non-skewed data.
+  - *Validation check, not just trusting the metric:* queried
+    `_metadata.file_path` grouped by `merchant_id` directly. `mer_1000`:
+    321,118 rows in file 1, 320,443 in file 2 (near-even split). `mer_1001`:
+    320,635 / 321,175 (same). Checked several "cold" merchant IDs too
+    (`mer_1034`, `mer_1045`, `mer_1068`, ...) — **every single one** also
+    showed rows in both files. Zero keys achieved separation, hot or cold —
+    fully explains the `0.0` score; a clean, concrete confirmation, not an
+    inference from the number alone.
+  - **Follow-up investigation, reported honestly as inconclusive:** the
+    clustering pass that produced this result also compacted the table to
+    2 files — below the 4-file compaction threshold again. Tried three ways
+    to force further improvement: a second plain `OPTIMIZE` (declined,
+    `numFilesAdded: 0`); setting `delta.targetFileSize` down to `8mb` and
+    re-fragmenting to 11 files via `REPARTITION(20)` before `OPTIMIZE`
+    (still declined, `numFilesAdded: 0` despite `numIdealFiles: 6` in its
+    own metrics); `OPTIMIZE ... FULL` (still declined). Stopped here rather
+    than chase increasingly obscure platform internals further — genuinely
+    unresolved whether this is a fundamental limit of `sizeAware` clustering
+    under this much skew at this data volume, or an unrelated quirk in how
+    this platform handles re-optimizing an already-once-clustered table
+    (`isNewMetadataCreated: false` in every subsequent attempt's metrics is
+    a hint worth returning to, not yet chased down).
+  - **Free bonus, corrected from the plan's original wording:** confirmed
+    the multiline source's incidental skew — exploding
+    `bronze_gb.raw_events_multiline`'s `reference_data.merchants` array
+    gives 240,203 raw rows across only 100 distinct `merchant_id`s (the
+    window `int_multiline_merchants.sql` collapses via `row_number()`). The
+    plan's original text said "~20,000 pages" — that figure was written
+    against the pre-ADR-0011-revision 25M-event target; the real number at
+    this project's actual ~5M-event scale is different, corrected here
+    rather than left stale.
+  - Scratch table dropped immediately after (`DROP TABLE`), confirmed clean.
+  - **Conclusion:** deliberate skew injection did its job as a pedagogical
+    device — it produced a real, measurable, quantified clustering failure
+    (`0.0` quality, confirmed at the row level) rather than the clean win
+    `8.2b` showed on non-skewed data. The interaction between skew,
+    compaction, and the file-count threshold is real and worth flagging for
+    anyone tuning liquid clustering on genuinely skewed production data —
+    the "fix" isn't obviously a single config knob, and this session
+    couldn't fully resolve what would unstick it.
+
+- **Step 8.6** — not yet reached.
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: `ALTER TABLE ... CLUSTER BY` and `OPTIMIZE`
@@ -554,6 +657,14 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   a bare per-call `SET` without a shared session does nothing, and the
   result cache matches on logical equivalence, not literal query text, so
   even uniquely-aliased queries can share a cached result silently.
+- **Skew handling on real data has no obvious single-knob fix in this
+  session's findings.** Where `8.2b` showed a clean threshold effect
+  (below 4 files, no clustering; above it, real separation), `8.5` found
+  that skew can produce poor clustering quality even when the file-count
+  threshold is technically met, and that the usual levers (re-running
+  `OPTIMIZE`, smaller target file size, `FULL`) didn't budge it further
+  within this investigation. Treat this as an open question for anyone
+  tuning clustering on genuinely skewed production data, not a solved one.
 
 ## 8. Data Quality & Governance
 - No new physical tables created by `8.1`/`8.2` (per ADR-0011's table-quota
@@ -564,6 +675,9 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   named exception (an experiment doc explicitly justifying it, gated, dropped
   immediately after the comparison completes) — confirmed dropped, zero
   lasting footprint on the table-quota budget.
+- `8.5` created one more scratch table
+  (`gold_gb._scratch_fct_transactions_skew_test`), same named exception,
+  same discipline — confirmed dropped after use.
 
 ## 9. Validation & Acceptance Criteria
 - [x] `8.1` baseline captured with a validated-clean starting state (no
@@ -585,7 +699,12 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
       logical equivalence, not query text) found and fixed via an explicit
       session; cold-start effects caught and re-measured warm in both parts;
       `SortMergeJoin`'s Photon fallback and cost confirmed at two scales
-- [ ] `8.5`–`8.6`: not yet run
+- [x] `8.5`: skew's effect on clustering quantified (`approxClusteringQuality
+      : 0.0`) and confirmed at the row level (every merchant ID split across
+      both files); follow-up attempts to improve it reported honestly as
+      inconclusive rather than fabricated; bonus multiline-skew figure
+      corrected against the actual ~5M-scale run; scratch table dropped
+- [ ] `8.6`: not yet run
 - [ ] All six ADR-0008 techniques have a recorded before/after result
 - [ ] `README.md` roadmap/Status updated; `v0.9` tagged — final steps, not yet
       reached
@@ -630,6 +749,13 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 - `shuffle_read_bytes = 0` on a real shuffle is a platform signal (shuffle
   stays local on this workspace's few-node serverless warehouse), not a
   broken metric — confirmed at two different scales.
+- `approxClusteringQuality` is real and quotable — a 0.0 score means zero
+  keys separated, confirmed independently by checking which files each
+  key's rows actually landed in, not just trusted from the number alone.
+- Skew can defeat clustering even when the file-count threshold is
+  technically met, and the usual levers to force further improvement
+  (re-`OPTIMIZE`, smaller target size, `FULL`) didn't work here — an honest
+  open question, not a solved one, worth flagging rather than glossing over.
 
 ## 11. Knowledge Check
 - Q1: Why did `OPTIMIZE` report `numFilesAdded: 0` even though it ran
@@ -665,6 +791,17 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 - Q10: `shuffle_read_bytes` read exactly 0 for an 80 MB, 4.6M-row,
   16-way-partitioned shuffle. Does that mean no shuffle happened? What does
   it actually tell you about this workspace's compute?
+- Q11: `8.5`'s clustering pass reported `approxClusteringQuality: 0.0`
+  despite genuinely rewriting files (`numFilesAdded: 2, numFilesRemoved: 8`).
+  What would you check to confirm this number reflects reality rather than
+  trusting it blindly?
+- Q12: Both the hot merchant IDs (`mer_1000`/`mer_1001`) *and* several cold
+  ones ended up split across both resulting files. Why is that more
+  surprising — and more informative — than just the hot ones being split?
+- Q13: Three different attempts to improve `8.5`'s clustering result all
+  declined to rewrite anything. What's the difference between reporting
+  that honestly as "inconclusive" versus either fabricating a root cause or
+  quietly leaving it out of the write-up?
 
 ## 12. References
 - Internal: [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md),
@@ -683,3 +820,4 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 | 2026-07-28 | `8.2b` added: empirical verification of `8.2`'s null result on a disposable scratch copy, forced past the file-count threshold — real clustering effect confirmed directly (files 8→1, bytes ~118 MB→~12.9 MB), plus a found-live sub-finding that bin-packing `OPTIMIZE` doesn't split large files | Chirag + Claude |
 | 2026-07-28 | `8.3` added: `OPTIMIZE`/file compaction on a genuinely fragmented table (`bronze_gb.raw_events_multiline`, 20 files). Found and fixed two real methodology confounds first (Delta metadata-only query answering, query result caching) and confirmed Predictive Optimization is genuinely active on this workspace (invisible to `SHOW TBLPROPERTIES`, visible in `system.storage.predictive_optimization_operations_history`). Real, causally-explained result: files 20→4, duration −60%, contrasted directly with `8.2`'s cache-artifact duration drop | Chirag + Claude |
 | 2026-07-28 | `8.4` added: join strategy, both a small-dim (`fct_transactions` × `dim_merchants`) and a large-large (`int_events_deduped` × `int_transactions`) test. Confirmed join hints are honored and that forcing `SortMergeJoin` falls out of Photon entirely. Found and fixed a genuine result-cache confound (matches on logical equivalence, not query text — fixed via an explicit session) and caught cold-start effects in both parts before trusting any comparison. Spark's own default join choice won in both scenarios; `shuffle_read_bytes` stayed 0 at both scales, read as a real platform signal | Chirag + Claude |
+| 2026-07-28 | `8.5` added: skew handling, on a disposable scratch copy of `fct_transactions` (real skewed data preserved). Clustering achieved `approxClusteringQuality: 0.0` — confirmed directly at the row level, every merchant ID (hot and cold) split across both resulting files. Three follow-up attempts to force improvement (re-`OPTIMIZE`, smaller target file size, `OPTIMIZE FULL`) all declined to rewrite anything — reported honestly as inconclusive. Corrected the plan's original "~20,000 pages" multiline-skew figure against the actual ~5M-event scale (240,203 raw rows / 100 merchants). Scratch table dropped after use | Chirag + Claude |

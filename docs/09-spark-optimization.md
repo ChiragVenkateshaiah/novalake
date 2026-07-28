@@ -1,8 +1,8 @@
 # Module 9 · Spark Optimization (Serverless-Constrained)
 
 `Status:` Draft — GB-scale full run complete and validated (2026-07-28);
-`§8` optimization experiments in progress (8.1, 8.2, 8.2b, 8.3, 8.4, 8.5
-done) · `Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:`
+all six `§8` optimization experiments complete (8.1–8.6, plus the 8.2b
+verification) · `Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:`
 multi-session
 
 **Scope, per [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md):**
@@ -99,7 +99,19 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 - [x] Knows when to stop chasing a platform internal and report a finding as
       genuinely inconclusive, rather than either fabricating an explanation
       or silently dropping the result
-- [ ] `8.6` objectives — not yet reached
+- [x] Can construct a fair, forced (non-prunable) UDF-vs-native-SQL
+      comparison on real GB-scale data and read the resulting `EXPLAIN`
+      plan for `BatchEvalPython` — and knows this is a Spark-classic plan
+      node invisible to a SQL-warehouse Python UDF, requiring a serverless
+      notebook/job instead (per `8.0`'s compute-surface mapping)
+- [x] Can explain why a UDF's presence costs more than just its own
+      execution time — it can force *every downstream stage* of the same
+      query plan out of Photon acceleration, not only the transform step
+      itself
+- [x] Can distinguish a UDF-specific cold-start cost (Python worker process
+      startup) from generic warehouse/cache warm-up, by comparing the
+      relative size of the first-run-to-second-run gap against this
+      session's other before/after pairs
 
 ## 2. Prerequisites
 - `v0.9`'s GB-scale regeneration (ADR-0011) complete and validated: `bronze_gb`/
@@ -227,6 +239,20 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   `delta.targetFileSize` with 11 files present, and `OPTIMIZE ... FULL` —
   none rewrote anything). This wasn't fully root-caused — reported as a
   genuine open question, not a fabricated explanation.
+- **A Python UDF's real cost is bigger than the UDF's own execution
+  time.** `8.6` found the UDF-containing plan's `BatchEvalPython` node
+  causes Photon to decline the *entire rest* of the query plan too — every
+  downstream `HashAggregate`/`Exchange` stage after the UDF runs in
+  classic Spark, not just the UDF step itself. The native-SQL-only plan for
+  the identical transformation stayed fully Photon-native end-to-end.
+- **UDF cold-start is a distinct cost from generic warehouse warm-up, and
+  it's large.** `8.6`'s UDF query dropped from 17.19s (1st run) to 2.11s
+  (2nd run) — an ~8x, ~15-second gap. Every other before/after pair
+  measured this session (`8.2`, `8.3`, `8.4`) showed a warm-up gap of at
+  most a few seconds. The much larger, UDF-specific gap points to Python
+  worker process startup (`BatchEvalPython` forks a separate Python
+  interpreter subprocess), not just the warehouse/cache warming that
+  explains the smaller gaps elsewhere.
 
 ## 5. Data Contract / Schema in Scope
 - `novalake.gold_gb.fct_transactions` — 2,138,809 rows, 21 columns, unclustered
@@ -262,6 +288,11 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   exploded — 240,203 raw merchant-reference rows across only 100 distinct
   `merchant_id`s, the source of `int_multiline_merchants`' cross-page
   resolution window
+- `8.6`'s candidate: `novalake.silver_gb.int_transactions_clean.country_raw`
+  (1,367,811 rows) — mirrors `src/dbt/macros/clean_country.sql` (the
+  highest-complexity existing macro, a 4-branch `CASE` + `else`) as a
+  Python UDF, timed against the identical logic expressed as native Spark
+  SQL functions
 
 ## 6. Step-by-Step Implementation
 
@@ -630,7 +661,76 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
     the "fix" isn't obviously a single config knob, and this session
     couldn't fully resolve what would unstick it.
 
-- **Step 8.6** — not yet reached.
+- **Step 8.6 — UDF elimination**
+  - *Objective:* measure the real cost of a Python UDF against the
+    identical transformation expressed as native Spark SQL, on real
+    GB-scale data — a deliberately constructed pedagogical comparison
+    (mirroring an existing macro, not an organic finding), stated as such.
+  - *Concept:* per `8.0`'s compute-surface mapping, this needs a serverless
+    **notebook/job**, not the SQL warehouse — a Python UDF invoked from a
+    SQL warehouse is a Unity Catalog Python UDF with different execution
+    semantics; the classic `BatchEvalPython` plan node this experiment
+    wants to see only shows up under real PySpark execution.
+  - *Task (gated, ADR-0009):* mirrored `clean_country.sql` (4-branch `CASE`
+    + `else`; null → null; US/USA/UNITED STATES → US; GB/UK → GB;
+    IN/INDIA → IN; CA/CANADA → CA; else upper/trim passthrough) as a Python
+    UDF, and the identical logic as native `when`/`otherwise` Spark SQL
+    functions. Ran both against `silver_gb.int_transactions_clean
+    .country_raw` (1,367,811 rows) via a one-time job submission
+    (`spark_python_task`, uploaded as a plain workspace `FILE` — a first
+    `workspace import` attempt converted it to a `NOTEBOOK` object by
+    default, re-imported with `--format RAW` to get a real file path
+    usable by `python_file`), not a saved bundle resource — avoids touching
+    `resources/*.yml` and the Vector Search recreation side effect a
+    `bundle deploy` would risk.
+  - **Forcing action, per the plan's own flagged requirement:** used
+    `count(distinct <transformed col>)`, not a bare `.count()` — the latter
+    would let Spark prune the unused transformed column entirely and make
+    both variants' timings identical and meaningless.
+  - *Expected output / observed:*
+    - **Correctness:** both variants return the identical result (`n=7`
+      distinct clean country codes — US/GB/IN/CA plus JP/DE/FR passing
+      through unchanged, matching the generator's `COUNTRIES` pool exactly).
+    - **Plan shape — bigger than just the transform step:** the UDF plan
+      shows a real `BatchEvalPython` node, and Photon explicitly declines it
+      ("Unsupported node: BatchEvalPython"). But the fallback isn't scoped
+      to just that node — **every downstream stage** (`HashAggregate`,
+      `Exchange`) after the UDF also runs in classic Spark, not Photon. The
+      native SQL plan stays fully Photon-native end-to-end
+      (`PhotonProject`/`PhotonGroupingAgg`/`PhotonShuffleExchange`/
+      `PhotonAgg`) — "The query is fully supported by Photon."
+    - **Timing**, each variant run twice (per this session's standard
+      protocol, to separate cold-start from steady-state):
+
+      | | 1st run | 2nd run |
+      |---|---|---|
+      | UDF | 17.190 s | 2.105 s |
+      | Native SQL | 1.081 s | 0.806 s |
+
+  - **A genuinely new category of finding, distinct from generic warm-up:**
+    the UDF's 1st→2nd gap (17.19s→2.11s, ~8x, ~15 seconds) is far larger
+    than any warm-up gap measured elsewhere this session (`8.2`, `8.3`,
+    `8.4` all showed gaps of at most a few seconds). This points to a real,
+    UDF-specific cost — Python worker process startup for
+    `BatchEvalPython` — not just the warehouse/cache warming that explains
+    the smaller native-SQL gap (1.08s→0.81s, ~25%).
+  - *Validation check:* correctness (`n=7` both ways) confirmed before
+    trusting the timing comparison at all; `EXPLAIN FORMATTED` captured for
+    both variants, not just wall-clock, so the *reason* for the gap
+    (Photon fallback, not just "UDFs are slow") is directly visible.
+  - Workspace scratch file deleted after use, no lasting footprint.
+  - **Conclusion:** even warm-to-warm, the UDF is ~2.6x slower (2.105s vs.
+    0.806s) for an identical transformation — and the cost compounds
+    because the UDF forces the *whole rest* of the query out of Photon, not
+    just its own step. This is the clearest, most complete "why avoid a
+    UDF when a native expression exists" result in `§8` — visible at GB
+    scale in a way it never would be at the original ~7K-row dataset.
+
+**All six of ADR-0008's named optimization techniques now have a recorded,
+evidence-backed before/after result: liquid clustering (`8.2`/`8.2b`),
+`OPTIMIZE`/file compaction (`8.3`), join strategy (`8.4`), skew handling
+(`8.5`), and UDF elimination (`8.6`) — `8.1` set the baseline/methodology
+every later step reused.**
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: `ALTER TABLE ... CLUSTER BY` and `OPTIMIZE`
@@ -678,6 +778,10 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 - `8.5` created one more scratch table
   (`gold_gb._scratch_fct_transactions_skew_test`), same named exception,
   same discipline — confirmed dropped after use.
+- `8.6` uploaded one scratch workspace file
+  (`/Workspace/Users/.../scratch/v0.9_8_6_udf_test.py`, a one-time job
+  submission, not a saved bundle resource) — confirmed deleted after use,
+  no new tables created at all (pure computation, no writes).
 
 ## 9. Validation & Acceptance Criteria
 - [x] `8.1` baseline captured with a validated-clean starting state (no
@@ -704,8 +808,13 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
       both files); follow-up attempts to improve it reported honestly as
       inconclusive rather than fabricated; bonus multiline-skew figure
       corrected against the actual ~5M-scale run; scratch table dropped
-- [ ] `8.6`: not yet run
-- [ ] All six ADR-0008 techniques have a recorded before/after result
+- [x] `8.6`: real UDF-vs-native-SQL comparison, correctness verified before
+      trusting timing, `BatchEvalPython`'s full-plan Photon fallback
+      confirmed via `EXPLAIN`, a genuinely distinct UDF cold-start cost
+      identified against this session's other warm-up gaps; scratch file
+      deleted after use
+- [x] All six ADR-0008 techniques have a recorded, evidence-backed
+      before/after result
 - [ ] `README.md` roadmap/Status updated; `v0.9` tagged — final steps, not yet
       reached
 
@@ -756,6 +865,15 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   technically met, and the usual levers to force further improvement
   (re-`OPTIMIZE`, smaller target size, `FULL`) didn't work here — an honest
   open question, not a solved one, worth flagging rather than glossing over.
+- A Python UDF's cost isn't contained to itself — it can push the entire
+  rest of a query plan out of Photon, and its cold-start (Python worker
+  process spin-up) is a distinct, much larger cost category than the
+  generic warehouse warm-up seen elsewhere this session.
+- All six ADR-0008 techniques now have a real, evidence-backed result —
+  three clear wins-or-losses with causal explanation (`8.3` compaction,
+  `8.4` join strategy, `8.6` UDF elimination), one clean win once past a
+  threshold (`8.2b` clustering), and one genuinely unresolved open question
+  (`8.5` skew) — an honest mix, not a run of uniform successes.
 
 ## 11. Knowledge Check
 - Q1: Why did `OPTIMIZE` report `numFilesAdded: 0` even though it ran
@@ -802,6 +920,13 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   declined to rewrite anything. What's the difference between reporting
   that honestly as "inconclusive" versus either fabricating a root cause or
   quietly leaving it out of the write-up?
+- Q14: The UDF plan's `EXPLAIN` showed classic `HashAggregate`/`Exchange`
+  stages *after* the `BatchEvalPython` node, not just the node itself. What
+  does that tell you about the actual scope of a UDF's cost in a query plan?
+- Q15: The UDF query's 1st-to-2nd-run gap (17.19s→2.11s) is roughly 5x
+  larger than any other before/after gap measured this session. What kind
+  of cost would produce a gap that much bigger than ordinary warehouse
+  warm-up, and why wouldn't native SQL show the same gap?
 
 ## 12. References
 - Internal: [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md),
@@ -821,3 +946,4 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 | 2026-07-28 | `8.3` added: `OPTIMIZE`/file compaction on a genuinely fragmented table (`bronze_gb.raw_events_multiline`, 20 files). Found and fixed two real methodology confounds first (Delta metadata-only query answering, query result caching) and confirmed Predictive Optimization is genuinely active on this workspace (invisible to `SHOW TBLPROPERTIES`, visible in `system.storage.predictive_optimization_operations_history`). Real, causally-explained result: files 20→4, duration −60%, contrasted directly with `8.2`'s cache-artifact duration drop | Chirag + Claude |
 | 2026-07-28 | `8.4` added: join strategy, both a small-dim (`fct_transactions` × `dim_merchants`) and a large-large (`int_events_deduped` × `int_transactions`) test. Confirmed join hints are honored and that forcing `SortMergeJoin` falls out of Photon entirely. Found and fixed a genuine result-cache confound (matches on logical equivalence, not query text — fixed via an explicit session) and caught cold-start effects in both parts before trusting any comparison. Spark's own default join choice won in both scenarios; `shuffle_read_bytes` stayed 0 at both scales, read as a real platform signal | Chirag + Claude |
 | 2026-07-28 | `8.5` added: skew handling, on a disposable scratch copy of `fct_transactions` (real skewed data preserved). Clustering achieved `approxClusteringQuality: 0.0` — confirmed directly at the row level, every merchant ID (hot and cold) split across both resulting files. Three follow-up attempts to force improvement (re-`OPTIMIZE`, smaller target file size, `OPTIMIZE FULL`) all declined to rewrite anything — reported honestly as inconclusive. Corrected the plan's original "~20,000 pages" multiline-skew figure against the actual ~5M-event scale (240,203 raw rows / 100 merchants). Scratch table dropped after use | Chirag + Claude |
+| 2026-07-28 | `8.6` added: UDF elimination, on a serverless one-time job (not the warehouse, per `8.0`). Mirrored `clean_country.sql` as a Python UDF vs. native Spark SQL against `int_transactions_clean.country_raw` (1.37M rows). Correctness confirmed (`n=7` both ways) before trusting timing. Found the UDF's `BatchEvalPython` node forces the *entire rest* of the query plan out of Photon, not just the transform step; native SQL stayed fully Photon-native. UDF ~2.6x slower warm-to-warm (2.11s vs. 0.81s), with a UDF-specific cold-start cost (~15s, Python worker startup) far larger than any other warm-up gap measured this session. Completes all six ADR-0008 techniques with a recorded result | Chirag + Claude |

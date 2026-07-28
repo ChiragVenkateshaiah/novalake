@@ -18,17 +18,34 @@ Design goals (the "challenges" baked into the data):
     numbers-as-strings, out-of-range timestamps, malformed nested values).
 
 Output: payments_events.json  (newline-delimited JSON, one event per line)
+
+v0.9 rewrite (see docs/adr/0011-gb-scale-data-regeneration.md): generates
+and writes in bounded-memory CHUNKS instead of building one big in-memory
+list, so this scales to tens of millions of events. Every default below
+still reproduces the original small-scale behavior (N_EVENTS=7000, SEED=42)
+when run with no flags -- this stays a working smoke test at that scale, not
+just a GB-scale tool.
+
+Two adaptations from the original single-pass design, both deliberate, both
+documented in ADR-0011:
+  - Duplicate-event injection now happens per-chunk (same ~1.5% global
+    ratio, same mechanism), with duplicates stamped `ingested_at + 1s`
+    instead of real elapsed wall-clock time -- this keeps
+    int_events_deduped.sql's tie-break ordering deterministic even though
+    chunking collapses the original's multi-second generation gap.
+  - Shuffle happens per-chunk instead of one global shuffle. Physical row
+    order was never a preserved property and nothing downstream depends on
+    it.
 """
 
+import argparse
 import json
+import os
 import random
 import uuid
 import datetime as dt
+from collections import Counter
 
-SEED = 42
-random.seed(SEED)
-
-N_EVENTS = 7000
 START = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
 END = dt.datetime(2026, 6, 15, tzinfo=dt.timezone.utc)
 
@@ -134,6 +151,20 @@ RISK_NOTES = [
 KYC_DOC_TYPES = ["passport", "drivers_license", "national_id", "utility_bill", "bank_statement"]
 
 # ---------------------------------------------------------------------------
+# Skew injection (v0.9, additive -- see docs/adr/0011-gb-scale-data-regeneration.md)
+# ---------------------------------------------------------------------------
+
+# Populated from --skew-merchant-ids at runtime. Empty = off = uniform draw,
+# identical to pre-v0.9 behavior.
+SKEW_MERCHANT_IDS = []
+SKEW_SHARE = 0.6  # combined draw probability given to the hot IDs when enabled
+
+def pick_merchant_id():
+    if SKEW_MERCHANT_IDS and random.random() < SKEW_SHARE:
+        return random.choice(SKEW_MERCHANT_IDS)
+    return f"mer_{random.randint(1000, 1099)}"
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -144,6 +175,9 @@ def rand_ts():
 
 def iso(ts):
     return ts.isoformat().replace("+00:00", "Z")
+
+def parse_iso(s):
+    return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 def epoch_millis(ts):
     return int(ts.timestamp() * 1000)
@@ -175,7 +209,7 @@ def device_struct():
 
 def merchant_struct():
     return {
-        "merchant_id": f"mer_{random.randint(1000, 1099)}",
+        "merchant_id": pick_merchant_id(),
         "name": random.choice(MERCHANT_NAMES),
         "category": random.choice(MERCHANT_CATEGORIES),
         "country": random.choice(COUNTRIES),
@@ -262,7 +296,7 @@ def build_payout(v2):
         "amount": round(random.uniform(0.1, 25.0), 2),
     } for _ in range(n_fees)]
     return {
-        "merchant_id": f"mer_{random.randint(1000, 1099)}",
+        "merchant_id": pick_merchant_id(),
         "gross_amount": money_amount() * random.randint(2, 40),
         "currency": pick_currency(),
         "schedule": {
@@ -355,7 +389,7 @@ def build_review(v2):
     )
     return {
         ("customer_id" if v2 else "cust_id"): customer_id(),
-        "merchant_id": f"mer_{random.randint(1000, 1099)}",
+        "merchant_id": pick_merchant_id(),
         "rating": random.choice([1, 2, 3, 3, 4, 4, 5, 5, 5]),
         "title": title,
         "body": body,
@@ -441,46 +475,85 @@ def build_envelope(event_type, builder):
     return env
 
 # ---------------------------------------------------------------------------
-# Generate
+# Generate (v0.9: chunked/streaming -- see module docstring)
 # ---------------------------------------------------------------------------
 
-def main():
-    events = []
-    for _ in range(N_EVENTS):
+def generate_chunk(n):
+    """Build n events plus their ~1.5% duplicate injections, shuffled.
+
+    Duplicates are stamped `ingested_at + 1s` (not real elapsed wall-clock
+    time) so int_events_deduped.sql's tie-break ordering
+    (try_cast(ingested_at as timestamp) desc, _ingested_at desc) stays
+    deterministic even at chunk boundaries -- see docs/adr/0011.
+    """
+    chunk = []
+    for _ in range(n):
         idx = random.choices(range(len(TYPES)), weights=WEIGHTS, k=1)[0]
-        events.append(build_envelope(TYPES[idx], BUILDERS[idx]))
+        chunk.append(build_envelope(TYPES[idx], BUILDERS[idx]))
 
-    # Inject duplicate event_ids (replays) for ~1.5% -> dedup practice
-    n_dupes = int(N_EVENTS * 0.015)
+    n_dupes = int(n * 0.015)
     for _ in range(n_dupes):
-        src = random.choice(events)
+        src = random.choice(chunk)
         dup = json.loads(json.dumps(src))
-        dup["ingested_at"] = iso(dt.datetime.now(dt.timezone.utc))  # later re-ingest
-        events.append(dup)
+        dup["ingested_at"] = iso(parse_iso(dup["ingested_at"]) + dt.timedelta(seconds=1))
+        chunk.append(dup)
 
-    random.shuffle(events)
+    random.shuffle(chunk)
+    return chunk
 
-    out_path = "/home/claude/payments_events.json"
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--n-events", type=int, default=7000)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--chunk-size", type=int, default=250_000)
+    parser.add_argument("--out-dir", default="/home/claude")
+    parser.add_argument(
+        "--skew-merchant-ids", type=int, default=0,
+        help="Number of merchant_ids (from mer_1000 upward) to make deliberately hot "
+             "(v0.9 skew-handling experiment; 0 = off, uniform draw, original behavior).",
+    )
+    args = parser.parse_args()
+
+    random.seed(args.seed)
+
+    global SKEW_MERCHANT_IDS
+    if args.skew_merchant_ids > 0:
+        SKEW_MERCHANT_IDS = [f"mer_{1000 + i}" for i in range(args.skew_merchant_ids)]
+
+    out_path = os.path.join(args.out_dir, "payments_events.json")
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    type_counts = Counter()
+    ver_counts = Counter()
+    null_ts = 0
+    id_counts = Counter()
+    total_written = 0
+
+    remaining = args.n_events
     with open(out_path, "w", encoding="utf-8") as f:
-        for e in events:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        while remaining > 0:
+            this_chunk = min(args.chunk_size, remaining)
+            chunk = generate_chunk(this_chunk)
+            for e in chunk:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+                type_counts[e["event_type"]] += 1
+                ver_counts[e["schema_version"]] += 1
+                id_counts[e["event_id"]] += 1
+                if e["event_timestamp"] is None:
+                    null_ts += 1
+            total_written += len(chunk)
+            remaining -= this_chunk
 
-    # --- quick stats for verification ---
-    from collections import Counter
-    type_counts = Counter(e["event_type"] for e in events)
-    ver_counts = Counter(e["schema_version"] for e in events)
-    null_ts = sum(1 for e in events if e["event_timestamp"] is None)
-    id_counts = Counter(e["event_id"] for e in events)
     dup_ids = sum(1 for c in id_counts.values() if c > 1)
-
-    import os
     size_mb = os.path.getsize(out_path) / (1024 * 1024)
 
-    print(f"Total records written : {len(events)}")
+    print(f"Total records written : {total_written}")
     print(f"File size             : {size_mb:.2f} MB")
     print(f"Schema versions       : {dict(ver_counts)}")
     print(f"Null timestamps       : {null_ts}")
     print(f"Duplicated event_ids  : {dup_ids}")
+    if SKEW_MERCHANT_IDS:
+        print(f"Skewed merchant_ids   : {SKEW_MERCHANT_IDS} ({SKEW_SHARE:.0%} combined draw share)")
     print("Event type counts     :")
     for t, c in type_counts.most_common():
         print(f"    {t:<24} {c}")

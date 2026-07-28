@@ -1,0 +1,146 @@
+resources:
+  jobs:
+    novalake_medallion_gb:
+      name: "[${bundle.target}] novalake GB-scale medallion (v0.9)"
+      # Job-level parameters (Databricks Jobs "parameters" feature) so the
+      # SAME job resource serves both the pilot run and the full-scale run --
+      # override via `databricks bundle run novalake_medallion_gb --params
+      # n_events_ndjson=16000000,...` rather than editing/redeploying this
+      # file between runs. Defaults below are PILOT scale (~1M events total,
+      # 64/36 ndjson/multiline split, per docs/adr/0011-gb-scale-data-regeneration.md
+      # -- deliberately NOT the full 25M target, so a bare `bundle run` never
+      # accidentally triggers the expensive full-scale generation.
+      parameters:
+        - name: n_events_ndjson
+          default: "640000"
+        - name: n_events_multiline
+          default: "360000"
+        - name: seed_ndjson
+          default: "42"
+        - name: seed_multiline
+          default: "43"
+        - name: chunk_size
+          default: "250000"
+        - name: pages_per_file
+          default: "20"     # pilot default; full run uses 200 (see ADR-0011 §3)
+        - name: skew_merchant_ids
+          default: "2"
+      # catalog is intentionally NOT a job parameter: it never varies between
+      # pilot and full-scale runs, and dbt_task's catalog field rejected the
+      # {{job.parameters.catalog}} runtime-reference syntax outright
+      # ("illegal characters") on the first real deploy attempt -- that
+      # syntax is only valid inside task `parameters` string arrays, not
+      # dbt_task's own typed fields. Uses the same ${var.catalog} bundle
+      # variable resources/dbt_job.yml already uses instead, resolved by DAB
+      # at deploy time, everywhere below.
+
+      tasks:
+        # Generation tasks run in parallel (independent sources) -- peak
+        # concurrency stays low (2 here, then 2 for ingest, then 1 for dbt),
+        # well under Free Edition's 5-concurrent-task-per-account ceiling
+        # (same reasoning resources/dbt_job.yml already documents for the
+        # small-scale job).
+        - task_key: generate_ndjson_gb
+          environment_key: gb_gen_env
+          spark_python_task:
+            python_file: ../data/generators/generate_events.py
+            parameters:
+              - "--n-events"
+              - "{{job.parameters.n_events_ndjson}}"
+              - "--seed"
+              - "{{job.parameters.seed_ndjson}}"
+              - "--chunk-size"
+              - "{{job.parameters.chunk_size}}"
+              - "--out-dir"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/ndjson"
+              - "--skew-merchant-ids"
+              - "{{job.parameters.skew_merchant_ids}}"
+
+        - task_key: generate_multiline_gb
+          environment_key: gb_gen_env
+          spark_python_task:
+            python_file: ../data/generators/generate_multiline.py
+            parameters:
+              - "--n-events"
+              - "{{job.parameters.n_events_multiline}}"
+              - "--seed"
+              - "{{job.parameters.seed_multiline}}"
+              - "--pages-per-file"
+              - "{{job.parameters.pages_per_file}}"
+              - "--out-dir"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/multiline"
+              - "--skew-merchant-ids"
+              - "{{job.parameters.skew_merchant_ids}}"
+
+        - task_key: bronze_ingest_gb
+          depends_on:
+            - task_key: generate_ndjson_gb
+          environment_key: pyspark_env
+          spark_python_task:
+            python_file: ../src/ingest.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--raw-path"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/ndjson/payments_events.json"
+              - "--target-schema"
+              - "bronze_gb"
+              - "--no-verbose-count"
+
+        - task_key: bronze_ingest_multiline_gb
+          depends_on:
+            - task_key: generate_multiline_gb
+          environment_key: pyspark_env
+          spark_python_task:
+            python_file: ../src/ingest_multiline.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--raw-path"
+              - "/Volumes/${var.catalog}/bronze/landing/gb_scale/multiline"
+              - "--target-schema"
+              - "bronze_gb"
+              - "--no-verbose-count"
+          # No depends_on bronze_ingest_gb -- independent Bronze sources,
+          # same reasoning as the small-scale job.
+
+        - task_key: dbt_silver_gold_gb
+          depends_on:
+            - task_key: bronze_ingest_gb
+            - task_key: bronze_ingest_multiline_gb
+          environment_key: dbt_env
+          dbt_task:
+            project_directory: ../src/dbt
+            commands:
+              # --exclude path:models/gold/genai: a live finding from the
+              # zero-cost `dbt compile`/`dbt list` check (docs/checkpoint.md,
+              # v0.9 pilot Step 0) -- generate_schema_name.sql's is_gb_scale
+              # suffix applies to EVERY model, gold.genai included, so
+              # without this exclude the RAG-corpus models would build an
+              # unwanted novalake.gold_gb.rag_*_corpus copy. GenAI-on-
+              # GB-scale data isn't in v0.9's scope (docs/adr/0011).
+              # Confirmed live: 101 of 103 models selected with this filter.
+              - "dbt run --vars \"{is_gb_scale: true}\" --exclude path:models/gold/genai"
+              - "dbt test --vars \"{is_gb_scale: true}\" --exclude path:models/gold/genai"
+            catalog: "${var.catalog}"
+            schema: "silver_gb"
+            warehouse_id: "${var.warehouse_id}"
+
+      environments:
+        - environment_key: gb_gen_env
+          spec:
+            client: "4"
+          # No dependencies -- both generators are pure Python stdlib
+          # (json/random/uuid/datetime), no SparkSession needed. UC Volumes
+          # are FUSE-mounted as a local filesystem path on job compute, so
+          # plain open()/os.makedirs() against /Volumes/... works without
+          # Spark APIs -- stated with high confidence in docs/adr/0011, this
+          # job's first real run is what actually confirms it live.
+        - environment_key: pyspark_env
+          spec:
+            client: "4"
+        - environment_key: dbt_env
+          spec:
+            client: "4"
+            dependencies:
+              - "dbt-databricks>=1.8,<2.0"

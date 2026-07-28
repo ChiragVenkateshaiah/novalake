@@ -96,7 +96,8 @@ novalake/
 │   ├── dbt_job.yml        # bronze ingest task -> dbt_task (Silver/Gold)
 │   ├── dashboard.yml      # AI/BI dashboard on Gold (v0.4)
 │   ├── vector_search.yml  # RAG endpoint + indexes (v0.6)
-│   └── dlt_pipeline.yml   # Declarative Pipelines comparison (v0.7)
+│   ├── dlt_pipeline.yml   # Declarative Pipelines comparison (v0.7)
+│   └── dbt_job_gb.yml     # GB-scale medallion rebuild, parameterized (v0.9)
 ├── src/
 │   ├── ingest.py           # PySpark: land + flatten the raw JSON (Bronze)
 │   ├── dbt/                # dbt project: Silver/Gold models + tests
@@ -115,7 +116,7 @@ novalake/
 │   ├── _skeleton.md        # reusable doc module template
 │   ├── adr/                # one-decision-per-file architecture records
 │   ├── notes/               # ad-hoc reference notes (e.g. a v0.6 UI walkthrough)
-│   └── 00-setup.md, ...    # one filled module per phase
+│   └── 00-setup.md, ...    # one filled module per phase, through 09-spark-optimization.md (v0.9)
 └── .github/workflows/     # CI (from v0.5, deploys via service principal)
 ```
 Each phase's directories/resource files were added when that phase actually
@@ -194,3 +195,47 @@ exposes only an aggregate count, never row content — so dbt's `_clean`/
 genuinely can't replace. Exact row-count, content, and expectation parity
 against the dbt original on every check. See
 [`docs/07-declarative-pipelines.md`](docs/07-declarative-pipelines.md).
+
+✅ `v0.9` Spark Optimization complete, tagged `v0.9` — **NovaLake's
+terminus, no `v0.10`.** GB-scale regeneration first
+([ADR-0011](docs/adr/0011-gb-scale-data-regeneration.md)): both generators
+rewritten for bounded-memory chunked/streaming output (a new
+`--skew-merchant-ids` knob added to both), ~5,000,000 events landed across
+`bronze_gb`/`silver_gb`/`gold_gb` (revised down from an original 25M target
+after a pilot run's real cost-per-GB measurement), all 101 applicable dbt
+models rebuilt against the full-scale data. A real generator bug surfaced
+and fixed along the way: the multiline generator never cleared its output
+directory between runs, so a full-scale run silently picked up 20 stale
+pilot-scale files alongside its own, corrupting `fct_transactions` with
+122,592 duplicate keys — root-caused via direct file listing, fixed
+permanently, remediated via a scoped local `dbt` rebuild. Confirmed live
+that Unity Catalog's 100-table/schema quota is a genuine,
+practically-non-raisable Free Edition override of the general 10,000/schema
+default (ADR-0011 addendum).
+
+Then `§8`'s six ADR-0008-named optimization techniques, each with a real,
+evidence-backed before/after result (see
+[`docs/09-spark-optimization.md`](docs/09-spark-optimization.md)): liquid
+clustering showed a clean null result on the real (2-file) `fct_transactions`
+and a clean win once forced past the file-count threshold on a scratch copy
+(files 8→1, bytes −89%); `OPTIMIZE`/file compaction cut a genuinely
+fragmented Bronze table's files 20→4 with a real, causally-explained 60%
+duration drop; join strategy confirmed Spark's own default (broadcast/
+shuffle-hash) already beats any forced alternative, with `MERGE`/
+`SortMergeJoin` falling out of Photon acceleration entirely; skew handling
+quantified a real clustering failure under deliberate skew
+(`approxClusteringQuality: 0.0`), honestly reported as a partly-unresolved
+open question after three follow-up attempts didn't unstick it; UDF
+elimination showed a constructed Python UDF running ~2.6x slower than the
+native SQL macro it mirrors, forcing the *entire* downstream query plan out
+of Photon, not just the UDF step. Both deliberately-constructed pedagogical
+artifacts (the skew knob, the demonstration UDF) are formally recorded in
+[ADR-0012](docs/adr/0012-deliberate-skew-and-udf-antipattern-injection.md).
+Real platform-methodology findings along the way, reusable for future work:
+`system.query.history` has no documented freshness SLA; the SQL result
+cache matches on logical result equivalence, not literal query text,
+requiring an explicit session to reliably bypass; Predictive Optimization is
+genuinely active on this workspace despite being invisible to
+`SHOW TBLPROPERTIES`. See
+[`docs/09-spark-optimization.md`](docs/09-spark-optimization.md) for the
+full technical narrative.

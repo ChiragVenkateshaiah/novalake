@@ -6,7 +6,13 @@ sources:
     # tracks the same `catalog` bundle variable src/ingest.py and the DAB
     # dbt_task both use. Hardcoding it here would silently decouple this
     # source from that variable if it's ever overridden.
-    schema: bronze
+    #
+    # v0.9 (docs/adr/0011-gb-scale-data-regeneration.md): schema is
+    # conditionally bronze_gb under the is_gb_scale var, same mechanism as
+    # generate_schema_name.sql -- var() in source YAML is genuinely
+    # supported by dbt (tracked for partial-parse invalidation), confirmed
+    # via the v0.9 plan's Opus review.
+    schema: "{{ 'bronze_gb' if var('is_gb_scale', false) else 'bronze' }}"
     tables:
       - name: raw_events
         description: >
@@ -16,10 +22,11 @@ sources:
         description: >
           Raw paginated export landed as-is by src/ingest_multiline.py from
           payments_events_multiline.json (multiLine=true read -- one row per
-          page, 9 rows). No transformation applied at this layer, including
-          the dynamic-key-map fields (metadata, balances, tax_ids, consents,
-          checksums, currency_catalog) -- confirmed via a real `describe`
-          that every one of them lands as a bounded, named-field struct
-          (Spark's inference is safe here since every dynamic-key map in
-          this generator draws from a fixed key universe), not an unbounded
-          explosion.
+          page; row count depends on scale -- 9 rows at the original small
+          scale, many more under is_gb_scale, see docs/adr/0011). No
+          transformation applied at this layer, including the dynamic-key-map
+          fields (metadata, balances, tax_ids, consents, checksums,
+          currency_catalog) -- confirmed via a real `describe` that every one
+          of them lands as a bounded, named-field struct (Spark's inference is
+          safe here since every dynamic-key map in this generator draws from
+          a fixed key universe), not an unbounded explosion.

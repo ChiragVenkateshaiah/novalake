@@ -1,7 +1,7 @@
 # Module 9 · Spark Optimization (Serverless-Constrained)
 
 `Status:` Draft — GB-scale full run complete and validated (2026-07-28);
-`§8` optimization experiments in progress (8.1, 8.2, 8.2b, 8.3 done) ·
+`§8` optimization experiments in progress (8.1, 8.2, 8.2b, 8.3, 8.4 done) ·
 `Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:` multi-session
 
 **Scope, per [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md):**
@@ -61,7 +61,29 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
       result (compaction: files drop a lot, bytes barely move, duration drops
       a lot; clustering: files *and* bytes both drop a lot for a filtered
       query)
-- [ ] `8.4`–`8.6` objectives — not yet reached
+- [x] Can force a join strategy via a SQL hint (`SHUFFLE_HASH`, `MERGE`) and
+      confirm via `EXPLAIN` it was actually honored — and knows that forcing
+      `MERGE` (`SortMergeJoin`) causes a **fallback out of Photon
+      acceleration entirely** on this platform, a real cost beyond just "a
+      different shuffle strategy"
+- [x] Can recognize a subtle result-cache behavior: Databricks' SQL result
+      cache matches on **logical result equivalence**, not literal query
+      text — a join hint doesn't change the declarative semantics, so
+      differently-hinted queries can silently share one cache entry even
+      with guaranteed-unique query text. Knows the actual fix: a bare `SET
+      use_cached_result = false` in a stateless tool call does nothing,
+      because each such call may be a fresh session; the real fix is an
+      explicit session (`POST /api/2.0/sql/sessions`, reusing its
+      `session_id` across calls)
+- [x] Can recognize a session's first-query cold-start tax (confirmed a
+      third time this module) and knows to always re-measure a "default"/
+      baseline warm, in the same session as the variants being compared —
+      not trust whichever number happened to run first
+- [x] Can explain why `shuffle_read_bytes` staying at exactly 0 for a real,
+      large (80 MB, 4.6M-row) shuffle isn't a measurement bug — it means no
+      data crossed the network, consistent with this workspace's serverless
+      warehouse running on few enough nodes that "shuffle" stays local
+- [ ] `8.5`–`8.6` objectives — not yet reached
 
 ## 2. Prerequisites
 - `v0.9`'s GB-scale regeneration (ADR-0011) complete and validated: `bronze_gb`/
@@ -145,6 +167,33 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   query shape (e.g. an aggregate over nested array content, not a bare
   `COUNT(*)`) that forces a genuine `PhotonScan`, confirmed via `EXPLAIN`
   before trusting the result.
+- **The result cache's real matching key is logical result equivalence, not
+  literal SQL text — and a bare `SET` in a stateless call doesn't disable
+  it.** `8.4` found this the hard way: a join-strategy hint doesn't change a
+  query's declarative semantics (same tables, same predicate, same output),
+  so Databricks' cache treated three hint-differing queries as "the same
+  query" and served one cached result to all three — confirmed directly via
+  `from_result_cache`/`cache_origin_statement_id` in `system.query.history`.
+  Neither disabling the cache via a separate `SET use_cached_result = false`
+  call nor giving each query a unique output alias fixed it, because each
+  MCP/CLI tool call is its own stateless session — a session-scoped `SET`
+  from one call has no effect on the next. The actual fix: create an
+  explicit session first (`POST /api/2.0/sql/sessions` → a real
+  `session_id`), then pass that same `session_id` on every subsequent
+  `POST /api/2.0/sql/statements` call (`SET`, then each query) — only then
+  does the `SET` actually apply to what follows.
+- **A session's first real query pays a cold-start tax, confirmed three
+  times now (`8.2`, `8.4`'s two sub-tests).** Never trust a "before" or
+  "default" measurement that happened to be the very first query issued in
+  a session — re-measure it warm, in the same session as whatever it's being
+  compared against, before drawing a conclusion from a duration gap.
+- **`shuffle_read_bytes = 0` on a real shuffle isn't a bug — it's a platform
+  signal.** This column measures bytes sent *over the network*. Seeing it at
+  exactly 0 for a real, large (80 MB, 16-way-partitioned) shuffle — twice,
+  at two different scales — is strong evidence this workspace's serverless
+  warehouse runs on few enough nodes that shuffle exchanges stay local,
+  never crossing the network. Consistent with ADR-0008's broader
+  limited-infra-visibility theme for this platform.
 
 ## 5. Data Contract / Schema in Scope
 - `novalake.gold_gb.fct_transactions` — 2,138,809 rows, 21 columns, unclustered
@@ -162,6 +211,15 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   `SELECT count(*), sum(size(data.events)) FROM bronze_gb.raw_events_multiline`
   (a full, unfiltered scan over nested array content — chosen specifically
   because it can't be answered from Delta metadata alone, see §4)
+- `8.4`'s two join candidates: `gold_gb.fct_transactions` (2.1M-row fact) ×
+  `gold_gb.dim_merchants` (100-row dimension) on `merchant_id` — small-dim
+  case, Spark auto-broadcasts by default; and `silver_gb.int_events_deduped`
+  (3,200,000 rows, all deduped events) × `silver_gb.int_transactions`
+  (1,439,742 rows, the transaction-type subset) on `event_id` — a genuine
+  large-large, foreign-key-like join (the second table is literally derived
+  from the first by filter), staying within the ndjson source per this
+  project's guardrail against joining ndjson/multiline identifiers across
+  sources
 
 ## 6. Step-by-Step Implementation
 
@@ -381,7 +439,95 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
     different mechanisms — tell them apart by which of bytes/files moves
     most in the result.
 
-- **Steps 8.4–8.6** — not yet reached.
+- **Step 8.4 — Join strategy**
+  - *Objective:* confirm SQL join hints are honored on serverless (a live
+    check the plan flagged as unverified), then measure the real cost of
+    forcing a non-default join strategy against Spark's own default choice,
+    on two genuinely different scenarios.
+  - *Concept:* Spark auto-broadcasts a small dimension by default; the more
+    informative test is a large-large join where Spark must choose between
+    shuffle-based strategies organically — the small-dim case is "somewhat
+    degenerate" (per the plan's own wording) since Spark already picks the
+    right plan without help.
+
+  **Part A — small-dim: `fct_transactions` (2.1M rows) × `dim_merchants`
+  (100 rows) on `merchant_id`.**
+  - *Task:* `EXPLAIN` the unhinted query (confirms Spark's default), then
+    the same query with `/*+ SHUFFLE_HASH(m) */` and `/*+ MERGE(m) */`.
+  - *Observed:* default → `PhotonBroadcastHashJoin` (as expected). `/*+
+    SHUFFLE_HASH(m) */` → `PhotonShuffledHashJoin`, still fully Photon.
+    `/*+ MERGE(m) */` → real `SortMergeJoin` — **and Photon explicitly
+    declines to run it** ("Photon does not fully support the query...
+    Unsupported node: SortMergeJoin"), falling back to classic row-based
+    Spark for the join itself. All three hints confirmed honored — the
+    plan's flagged live check is answered.
+  - **Measurement detour, a real methodology finding in its own right:**
+    the first attempt at measuring all three (separate stateless calls, each
+    preceded by its own `SET use_cached_result = false`) came back with
+    `read_bytes/read_files = 0` for both hinted variants, despite each
+    query's own `EXPLAIN` showing a real `PhotonScan`. Checked
+    `system.query.history`'s `from_result_cache`/`cache_origin_statement_id`
+    directly rather than assuming: both hinted queries had been served from
+    the **default query's cached result** — Databricks' cache matched on
+    logical equivalence (same tables/predicate/output), ignoring that the
+    hint changes physical execution, and the per-call `SET` never took
+    effect because each call is its own stateless session. Fixed by creating
+    an explicit session (`POST /api/2.0/sql/sessions`) and reusing its
+    `session_id` for `SET` + each query.
+  - *Final, cache-verified, same-warm-session results* (`count(*)` wrapper,
+    identical correctness check: all three return 2,111,585):
+
+    | Strategy | Files | Bytes read | Duration |
+    |---|---|---|---|
+    | Default (broadcast) | 3 | 2,467,304 | 888 ms |
+    | `SHUFFLE_HASH` | 3 | 2,467,304 | 1,083 ms (+22%) |
+    | `MERGE` (`SortMergeJoin`) | 3 | 2,467,304 | 2,095 ms (+136%) |
+
+    Bytes/files are **identical across all three** — expected and correct
+    for a join-strategy test (unlike `8.2`/`8.3`): the scan side doesn't
+    change, only how the join executes. The cost shows entirely in duration:
+    default was already optimal; `SHUFFLE_HASH` adds real but modest
+    overhead; `MERGE` is markedly worse, compounded by the Photon fallback.
+
+  **Part B — large-large: `int_events_deduped` (3,200,000 rows) ×
+  `int_transactions` (1,439,742 rows) on `event_id`.**
+  - *Task:* `EXPLAIN` the unhinted query first — does Spark pick
+    `SortMergeJoin` organically at this scale, or something else?
+  - *Observed:* Spark's own default here is `PhotonShuffledHashJoin`, not
+    `SortMergeJoin` — `int_transactions` (1.44M rows) is still small enough
+    to build an in-memory hash table after shuffling. Forced a genuine
+    `SortMergeJoin` via `/*+ MERGE(t) */`, confirmed via `EXPLAIN` (same
+    Photon-fallback pattern as Part A).
+  - **First measurement attempt was misleading again**, same lesson as
+    `8.2`: the un-hinted default ran first in a brand-new session and showed
+    6,591 ms, while the *second* query in that session (`MERGE`) showed only
+    2,450 ms — looking like `MERGE` won. Re-measured the default warm, in the
+    same session, before trusting this.
+  - *Final, cache-verified, fully-warm results* (correctness check: both
+    return 1,439,742 rows, matching `int_transactions` exactly — no orphans,
+    as expected since it's derived from `int_events_deduped` by filter):
+
+    | Strategy | Rows scanned | Bytes read | Files | Shuffle (network) | Duration |
+    |---|---|---|---|---|---|
+    | Default (`ShuffledHashJoin`) | 4,639,742 | 83,758,091 (~80 MB) | 10 | 0 | 1,311 ms |
+    | `MERGE` (`SortMergeJoin`) | 4,639,742 | 83,758,091 (~80 MB) | 10 | 0 | 2,038 ms |
+
+    Same direction as Part A (`SortMergeJoin` slower), a smaller relative
+    penalty this time (+55% vs. +136%) — at larger scale, more of the total
+    time is genuine shared I/O/shuffle work common to both strategies, so
+    the Photon-fallback penalty matters proportionally less.
+  - **`shuffle_read_bytes` stayed exactly 0 in both parts**, despite Part
+    B's real 80 MB, 16-way-partitioned shuffle — see §4's concept note; this
+    is read as a genuine platform signal (few-node serverless warehouse,
+    shuffle stays local), not a metric-collection gap.
+  - **Conclusion:** Spark's own default join selection was correct in both
+    scenarios tested here — broadcasting a small dimension, and
+    shuffle-hash-joining two large-but-not-both-huge tables. Forcing a
+    non-default strategy (`SHUFFLE_HASH` or `MERGE`) never won; `MERGE`
+    specifically costs the most, compounded by a real Photon-acceleration
+    loss on this platform, not just theoretical shuffle/sort overhead.
+
+- **Steps 8.5–8.6** — not yet reached.
 
 ## 7. Operational Considerations
 - Idempotency / re-run safety: `ALTER TABLE ... CLUSTER BY` and `OPTIMIZE`
@@ -401,6 +547,13 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   candidate table before any `8.x` before/after test, and act promptly once
   a clean "before" state is confirmed — PO could compact/cluster a table in
   the background at any time, and it leaves no trace in `SHOW TBLPROPERTIES`.
+- **Standard measurement protocol from `8.4` onward:** create an explicit
+  SQL session (`POST /api/2.0/sql/sessions`), run `SET use_cached_result =
+  false` in it, then run every variant being compared (including a warm
+  re-measurement of "default"/"before") within that same `session_id` —
+  a bare per-call `SET` without a shared session does nothing, and the
+  result cache matches on logical equivalence, not literal query text, so
+  even uniquely-aliased queries can share a cached result silently.
 
 ## 8. Data Quality & Governance
 - No new physical tables created by `8.1`/`8.2` (per ADR-0011's table-quota
@@ -427,7 +580,12 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
       diff (files 20→4), a real and causally-explained duration improvement
       (60%, unlike `8.2`'s cache artifact) — Predictive Optimization activity
       checked and accounted for before trusting the comparison
-- [ ] `8.4`–`8.6`: not yet run
+- [x] `8.4`: join hints confirmed honored via `EXPLAIN` on both a small-dim
+      and a large-large join; a real result-cache confound (matching on
+      logical equivalence, not query text) found and fixed via an explicit
+      session; cold-start effects caught and re-measured warm in both parts;
+      `SortMergeJoin`'s Photon fallback and cost confirmed at two scales
+- [ ] `8.5`–`8.6`: not yet run
 - [ ] All six ADR-0008 techniques have a recorded before/after result
 - [ ] `README.md` roadmap/Status updated; `v0.9` tagged — final steps, not yet
       reached
@@ -460,6 +618,18 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   invisible to `SHOW TBLPROPERTIES` — the only real evidence is
   `system.storage.predictive_optimization_operations_history`. Check it, and
   move promptly once a clean "before" state is confirmed.
+- Spark's default join selection (broadcast for a small dim, shuffle-hash
+  for two large-but-not-huge tables) was correct in both cases tested here —
+  forcing a different strategy never won, and forcing `SortMergeJoin`
+  specifically costs the most because it also falls out of Photon
+  acceleration on this platform, not just from extra sort/shuffle work.
+- The result cache matches on logical result equivalence, not literal SQL
+  text — a join hint alone won't bust it, and neither will a unique alias.
+  The only fix found: an explicit session (`POST /api/2.0/sql/sessions`)
+  reused across `SET` and each query being compared.
+- `shuffle_read_bytes = 0` on a real shuffle is a platform signal (shuffle
+  stays local on this workspace's few-node serverless warehouse), not a
+  broken metric — confirmed at two different scales.
 
 ## 11. Knowledge Check
 - Q1: Why did `OPTIMIZE` report `numFilesAdded: 0` even though it ran
@@ -480,6 +650,21 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
   showed both files *and* bytes drop by roughly the same large amount. What
   does that difference tell you about which optimization — compaction or
   clustering — actually ran in each case, without being told directly?
+- Q7: Two hinted queries in `8.4` came back with `read_bytes = 0` and
+  `read_files = 0` even though their own `EXPLAIN` plans showed real
+  `PhotonScan` nodes. What actually happened, and why didn't `SET
+  use_cached_result = false` prevent it?
+- Q8: In the large-large join test, the first (unhinted) query showed
+  6,591 ms and the forced `MERGE` query showed only 2,450 ms — making
+  `MERGE` look faster. What was actually wrong with that comparison, and
+  what did re-measuring reveal?
+- Q9: Forcing `MERGE` costs +136% at small scale but only +55% at large
+  scale, even though both cases fall out of Photon the same way. Why would
+  the same fallback cost a smaller *relative* penalty as the query gets
+  bigger?
+- Q10: `shuffle_read_bytes` read exactly 0 for an 80 MB, 4.6M-row,
+  16-way-partitioned shuffle. Does that mean no shuffle happened? What does
+  it actually tell you about this workspace's compute?
 
 ## 12. References
 - Internal: [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md),
@@ -497,3 +682,4 @@ anyway (no Spark UI, no cluster sizing, most `spark.conf` locked).
 | 2026-07-28 | Module created; `8.1` (baseline) and `8.2` (liquid clustering, a clean null result) documented | Chirag + Claude |
 | 2026-07-28 | `8.2b` added: empirical verification of `8.2`'s null result on a disposable scratch copy, forced past the file-count threshold — real clustering effect confirmed directly (files 8→1, bytes ~118 MB→~12.9 MB), plus a found-live sub-finding that bin-packing `OPTIMIZE` doesn't split large files | Chirag + Claude |
 | 2026-07-28 | `8.3` added: `OPTIMIZE`/file compaction on a genuinely fragmented table (`bronze_gb.raw_events_multiline`, 20 files). Found and fixed two real methodology confounds first (Delta metadata-only query answering, query result caching) and confirmed Predictive Optimization is genuinely active on this workspace (invisible to `SHOW TBLPROPERTIES`, visible in `system.storage.predictive_optimization_operations_history`). Real, causally-explained result: files 20→4, duration −60%, contrasted directly with `8.2`'s cache-artifact duration drop | Chirag + Claude |
+| 2026-07-28 | `8.4` added: join strategy, both a small-dim (`fct_transactions` × `dim_merchants`) and a large-large (`int_events_deduped` × `int_transactions`) test. Confirmed join hints are honored and that forcing `SortMergeJoin` falls out of Photon entirely. Found and fixed a genuine result-cache confound (matches on logical equivalence, not query text — fixed via an explicit session) and caught cold-start effects in both parts before trusting any comparison. Spark's own default join choice won in both scenarios; `shuffle_read_bytes` stayed 0 at both scales, read as a real platform signal | Chirag + Claude |

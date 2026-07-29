@@ -1,9 +1,9 @@
 # Module 9 · Spark Optimization (Serverless-Constrained)
 
-`Status:` Draft — GB-scale full run complete and validated (2026-07-28);
+`Status:` Complete — GB-scale full run complete and validated (2026-07-28);
 all six `§8` optimization experiments complete (8.1–8.6, plus the 8.2b
-verification) · `Owner:` Chirag · `Last updated:` 2026-07-28 · `Est. time:`
-multi-session
+verification); `README.md` updated and `v0.9` tagged on `main` · `Owner:`
+Chirag · `Last updated:` 2026-07-29 · `Est. time:` multi-session
 
 **Scope, per [ADR-0008](adr/0008-novalake-terminus-and-cerberus-succession.md):**
 "Spark optimization within serverless constraints, capped deliberately at the
@@ -815,8 +815,7 @@ every later step reused.**
       deleted after use
 - [x] All six ADR-0008 techniques have a recorded, evidence-backed
       before/after result
-- [ ] `README.md` roadmap/Status updated; `v0.9` tagged — final steps, not yet
-      reached
+- [x] `README.md` roadmap/Status updated; `v0.9` tagged on `main`
 
 ## 10. Key Takeaways
 - A config change (`ALTER TABLE ... CLUSTER BY`) and a physical effect

@@ -2,19 +2,19 @@ resources:
   jobs:
     novalake_medallion_gb:
       name: "[${bundle.target}] novalake GB-scale medallion (v0.9)"
-      # novalake-cicd (CI/CD service principal, see docs/adr/0006) needs
-      # CAN_MANAGE to plan/apply this resource via bundle-deploy.yml -- found
-      # missing 2026-07-28, the same day this job was first added: the push
-      # to main after v0.9's merge failed bundle-deploy.yml's planning step
-      # with a 403 (the service principal couldn't even read the job it
-      # needed to diff against). Matches the same grant level already held
-      # on resources/dbt_job.yml's job (checkpoint.md, 2026-07-22) -- the
-      # identifier here is the service principal's application/client ID,
-      # confirmed live via `databricks jobs get-permissions` on that
-      # existing job, not its display name.
-      permissions:
-        - service_principal_name: "3ee2f464-5c6c-4aee-b1b8-792210883a3a" # novalake-cicd
-          level: CAN_MANAGE
+      # novalake-cicd needs CAN_MANAGE to plan/apply this resource via
+      # bundle-deploy.yml -- found missing 2026-07-28 (403 on bundle-deploy's
+      # planning step). First fix (PR #8) declared a `permissions:` block
+      # here, which stopped the read 403 but caused DAB to try reconciling
+      # the ENTIRE ACL including ownership on every deploy, which
+      # novalake-cicd isn't allowed to touch ("only workspace admins can
+      # change the owner of a job/pipeline") -- the next deploy failed on a
+      # different error. Corrected fix: the grant is applied once, directly,
+      # via `databricks jobs update-permissions`, outside DAB's management --
+      # matching the pattern resources/dbt_job.yml's job has used since
+      # v0.5 (checkpoint.md, 2026-07-22), which is exactly why that job
+      # never needed a `permissions:` block here in the first place. See
+      # checkpoint.md's 2026-07-29 revisit-log entry for the applied grant.
       # Job-level parameters (Databricks Jobs "parameters" feature) so the
       # SAME job resource serves both the pilot run and the full-scale run --
       # override via `databricks bundle run novalake_medallion_gb --params

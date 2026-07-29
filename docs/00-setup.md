@@ -1,12 +1,12 @@
 # Module 0 · Project & Environment Setup
 
-`Status:` In progress  ·  `Owner:` Chirag  ·  `Last updated:` _TBD_  ·  `Est. time:` ~45 min
+`Status:` Complete  ·  `Owner:` Chirag  ·  `Last updated:` 2026-06-24  ·  `Est. time:` ~45 min
 
 ## 1. Learning Objectives
-- [ ] Can explain the Unity Catalog hierarchy: metastore → catalog → schema → table/volume
-- [ ] Can connect a Databricks workspace to a GitHub repo via Git folders and explain
+- [x] Can explain the Unity Catalog hierarchy: metastore → catalog → schema → table/volume
+- [x] Can connect a Databricks workspace to a GitHub repo via Git folders and explain
       what a Git folder actually syncs
-- [ ] Have a working catalog + four layer schemas + one landing volume, created
+- [x] Have a working catalog + four layer schemas + one landing volume, created
       idempotently from a notebook (not by hand-clicking, so it's repeatable)
 
 ## 2. Prerequisites
@@ -53,25 +53,25 @@ novalake (catalog)
 
 - **Step 6.1 — Create the GitHub repo**
   - *Task:* Create `novalake` on GitHub, push this scaffold.
-  - *Status:* ⬜ pending
+  - *Status:* ✅ done
 
 - **Step 6.2 — Link GitHub to the Databricks workspace**
   - *Task:* Settings → Linked accounts → Git credential (OAuth or PAT).
-  - *Status:* ⬜ pending
+  - *Status:* ✅ done
 
 - **Step 6.3 — Clone as a Git folder**
   - *Task:* Workspace → Create → Git folder → paste the repo URL.
-  - *Status:* ⬜ pending
+  - *Status:* ✅ done
 
 - **Step 6.4 — Run `notebooks/00_setup/01_catalog_schema_volume.py`**
   - *Task:* Create catalog, 4 schemas, landing volume.
   - *Expected output:* `SHOW SCHEMAS IN novalake` returns 4 rows.
-  - *Status:* ⬜ pending
+  - *Status:* ✅ done
 
 - **Step 6.5 — Upload both datasets to the landing volume**
   - *Task:* `payments_events.json` and `payments_events_multiline.json` →
     `/Volumes/novalake/bronze/landing/`.
-  - *Status:* ⬜ pending
+  - *Status:* ✅ done
 
 ## 7. Operational Considerations
 - Re-running the setup notebook is safe (idempotent DDL) — useful if Free Edition
@@ -105,4 +105,4 @@ novalake (catalog)
 ## Changelog
 | Date | Change | Author |
 |------|--------|--------|
-| _TBD_ | Module created | Chirag + Claude |
+| 2026-06-24 | Module created and validated | Chirag + Claude |

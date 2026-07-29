@@ -5,13 +5,15 @@ resources:
       # novalake-cicd needs CAN_MANAGE to plan/apply this resource via
       # bundle-deploy.yml -- found missing 2026-07-28: this pipeline never
       # got a permissions grant when it was created in v0.7, so every
-      # bundle-deploy.yml run since (v0.6, v0.7, v0.9 merges to main) has
-      # been failing at the planning step with a 403, silently -- the
-      # service principal couldn't even read this pipeline's current state.
-      # Same grant level/identifier convention as resources/dbt_job_gb.yml.
-      permissions:
-        - service_principal_name: "3ee2f464-5c6c-4aee-b1b8-792210883a3a" # novalake-cicd
-          level: CAN_MANAGE
+      # bundle-deploy.yml run since (v0.6, v0.7, v0.9 merges to main) had
+      # been failing at the planning step with a 403, silently. First fix
+      # (PR #8) declared a `permissions:` block here, which stopped the read
+      # 403 but made DAB try reconciling the entire ACL including ownership,
+      # which novalake-cicd can't touch -- next deploy failed differently.
+      # Corrected fix: grant applied once, directly, via `databricks
+      # pipelines update-permissions`, outside DAB's management -- same
+      # pattern resources/dbt_job_gb.yml now documents. See checkpoint.md's
+      # 2026-07-29 revisit-log entry for the applied grant.
       catalog: ${var.catalog}
       schema: bronze_dlt        # exactly one of schema/target required (schema
                                   # is the non-deprecated field); this is the

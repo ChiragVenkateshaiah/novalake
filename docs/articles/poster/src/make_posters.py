@@ -10,11 +10,14 @@ diagram read as the same body of work:
     gold tint      #F5EFC7     serving tint   #D9EDEA
     genai tint     #E6DEEF     muted rule     #8B909B
 
-Each part gets a saturated accent drawn from that same hue family, so the eight
-covers are distinguishable in a feed while still obviously one series.
+Each poster carries a compressed rendering of the full NovaLake architecture
+diagram — the same three bands as the reference: a dashed CI/CD control plane,
+a Unity Catalog container holding the six data-plane stages plus the DLT
+comparison branch, and the DAB orchestration bar spanning the bottom. Only the
+*highlight* changes between parts, so read across the series the diagram
+animates the build rather than repeating one static image eight times.
 
-Writes  src/part-N-<slug>.svg  and  ../part-N-<slug>.png  (2400x1260, 1.905:1 —
-the OG/LinkedIn standard, and well past Medium's 1192px minimum cover width).
+Writes  src/part-N-<slug>.svg  and  ../part-N-<slug>.png  (2400x1520).
 
 Usage:  python3 make_posters.py          (needs rsvg-convert on PATH)
 """
@@ -23,33 +26,53 @@ import pathlib
 import subprocess
 from xml.sax.saxutils import escape
 
-W, H = 1200, 630          # authored size; rendered at 2x
+W, H = 1200, 760          # authored size; rendered at 2x
 SCALE = 2
 
 CREAM = "#FAF6EC"
 INK = "#1B2A4A"
 DECK_INK = "#46536B"
-CHIP_OFF_STROKE = "#CFC9B9"
-CHIP_OFF_INK = "#9A9486"
+OFF_STROKE = "#CFC9B9"
+OFF_INK = "#9A9486"
+OFF_SUB = "#B3ADA0"
 FOOTER_INK = "#8B909B"
 SERIES_INK = "#A9A395"
+ARROW = "#7A8290"
+PANEL_STROKE = "#C9C3B4"
 
 SANS = "DejaVu Sans"
 MONO = "JetBrains Mono"
 
 FOOTER = "Databricks Free Edition · PySpark · dbt · Unity Catalog · DAB"
 
-# The six data-plane stages, drawn on every poster. The highlight advances
-# left-to-right across the series so the strip carries the story: a reader who
-# sees part 6 knows at a glance which layer it touches and what came before.
-STAGES = ["SOURCES", "BRONZE", "SILVER", "GOLD", "SERVING", "GENAI"]
+# ---------------------------------------------------------------------------
+# The architecture, as drawn on every poster. Names and sub-labels mirror
+# novalake-architecture.png so the poster and the in-article figure agree.
+# ---------------------------------------------------------------------------
+
+STAGES = [
+    ("SOURCES", "Event Generators", ["NDJSON + paginated export", "raw JSON → UC Volume"]),
+    ("BRONZE", "PySpark Ingestion", ["src/ingest.py · raw Delta", "schema-on-read · drops nothing"]),
+    ("SILVER", "dbt Transformations", ["~80 models · dedupe", "DLQ split · array explode"]),
+    ("GOLD", "dbt Dimensional Model", ["~22 models · conformed dims", "facts + metric rollups"]),
+    ("SERVING", "Genie + Dashboard", ["natural-language SQL", "3 pages · 11 datasets"]),
+    ("GENAI", "Vector Search + Agent", ["2 Delta Sync indexes", "Model Serving · LangGraph"]),
+]
+
+CICD = [
+    ("GitHub Actions", "validate on PR · deploy on merge"),
+    ("Scoped Service Principal", "OAuth M2M · least-privilege grants"),
+    ("bundle deploy", "target: dev · no --auto-approve"),
+]
 
 # Per-part highlight state:
-#   lit    — stages this part actually builds or measures (solid accent)
-#   mid    — stages shown as context, outlined in accent rather than filled
-#   rail   — light the CI/CD control plane above the data plane
-#   dashed — mark a lit stage as a parallel/comparison implementation
-#   cap    — one line saying what the highlighted slice does in this part
+#   lit    — stages this part builds or measures      (solid accent, cream text)
+#   mid    — stages shown as context                  (accent tint, navy text)
+#   rail   — light the CI/CD control plane
+#   dab    — light the orchestration bar
+#   dlt    — light the Lakeflow comparison branch
+#   dashed — draw the lit stage as a parallel implementation
+#   cap    — one line naming what the highlighted slice does in this part
 
 PARTS = [
     dict(
@@ -57,7 +80,7 @@ PARTS = [
         title=["The platform is the", "only source of truth"],
         deck=["A green checkmark that was quietly wrong — and the four-stage",
               "escalation that governed an AI agent's access for nine releases."],
-        lit=[], mid=STAGES, rail=True,
+        lit=[], mid=[s[0] for s in STAGES], rail=True, dab=True,
         cap="Every layer below, deployed through one written gate",
     ),
     dict(
@@ -65,7 +88,7 @@ PARTS = [
         title=["Bronze, and the", "confidently wrong fix"],
         deck=["51 inferred leaf fields, two of them lying — and an audit tool",
               "whose own null filter silently never fired."],
-        lit=["SOURCES", "BRONZE"],
+        lit=["SOURCES", "BRONZE"], dab=True,
         cap="Raw JSON → Delta. Schema-on-read: drops nothing, restructures nothing",
     ),
     dict(
@@ -73,7 +96,7 @@ PARTS = [
         title=["Silver and Gold"],
         deck=["Two pipelines describing the same business, deliberately never",
               "unified. Conformance verified per field, not assumed."],
-        lit=["SILVER", "GOLD"],
+        lit=["SILVER", "GOLD"], mid=["BRONZE"],
         cap="Two parallel pipelines, unified only at Gold — 101 dbt models",
     ),
     dict(
@@ -81,7 +104,7 @@ PARTS = [
         title=["Serving and CI/CD"],
         deck=["Guardrails against a model better at SQL than the guardrail —",
               "then a green checkmark that was quietly wrong."],
-        lit=["SERVING"], rail=True,
+        lit=["SERVING"], mid=["GOLD"], rail=True, dab=True,
         cap="Genie space + AI/BI dashboard on Gold, deployed by GitHub Actions",
     ),
     dict(
@@ -97,7 +120,7 @@ PARTS = [
         title=["DLT versus dbt, and", "getting to GB scale"],
         deck=["Three negative results and one that mattered — then rewriting",
               "both generators without losing their deliberate defects."],
-        lit=["SILVER"], dashed=True, mid=["SOURCES", "BRONZE"],
+        lit=["SILVER"], mid=["SOURCES", "BRONZE"], dlt=True, dashed=True,
         cap="A Silver slice rebuilt in DLT alongside dbt, then everything at GB scale",
     ),
     dict(
@@ -119,94 +142,145 @@ PARTS = [
 ]
 
 
+def box(add, x, y, w, h, state, accent, title, subs, ts=12, ss=8.5, dashed=False):
+    """One node of the diagram, in one of three highlight states."""
+    dash = ' stroke-dasharray="6 4"' if dashed else ''
+    if state == "lit":
+        add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="{accent}"'
+            f'{" stroke=\'#FAF6EC\' stroke-width=\'2\'" + dash if dashed else ""}/>')
+        t_ink, s_ink, s_op = CREAM, CREAM, "0.82"
+    elif state == "mid":
+        add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="{accent}" '
+            f'fill-opacity="0.16" stroke="{accent}" stroke-opacity="0.55" '
+            f'stroke-width="1.4"{dash}/>')
+        t_ink, s_ink, s_op = INK, INK, "0.72"
+    else:
+        add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" fill="{CREAM}" '
+            f'stroke="{OFF_STROKE}" stroke-width="1.3"{dash}/>')
+        t_ink, s_ink, s_op = OFF_INK, OFF_SUB, "1"
+
+    cx = x + w / 2
+    ty = y + (h - (ts + len(subs) * (ss + 3.5))) / 2 + ts
+    add(f'<text x="{cx}" y="{ty}" font-family="{SANS}" font-size="{ts}" font-weight="bold" '
+        f'fill="{t_ink}" text-anchor="middle">{escape(title)}</text>')
+    for i, s in enumerate(subs):
+        add(f'<text x="{cx}" y="{ty + 13 + i * (ss + 3.5)}" font-family="{SANS}" '
+            f'font-size="{ss}" fill="{s_ink}" fill-opacity="{s_op}" '
+            f'text-anchor="middle">{escape(s)}</text>')
+
+
+def arrow(add, x1, x2, y):
+    add(f'<line x1="{x1}" y1="{y}" x2="{x2 - 4}" y2="{y}" stroke="{ARROW}" stroke-width="1.5"/>')
+    add(f'<path d="M{x2 - 5},{y - 3.4} L{x2},{y} L{x2 - 5},{y + 3.4} Z" fill="{ARROW}"/>')
+
+
 def poster_svg(p):
     a = p["accent"]
     title, deck = p["title"], p["deck"]
+    lit, mid = set(p.get("lit", [])), set(p.get("mid", []))
     o = []
     add = o.append
+
+    def state_of(key):
+        return "lit" if key in lit else ("mid" if key in mid else "off")
 
     add(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W*SCALE}" height="{H*SCALE}" '
         f'viewBox="0 0 {W} {H}">')
     add(f'<rect width="{W}" height="{H}" fill="{CREAM}"/>')
-
-    # left accent bar — the strongest series/phase signal at thumbnail size
     add(f'<rect x="0" y="0" width="16" height="{H}" fill="{a}"/>')
 
-    # ghosted part numeral, right — sits clear of even a two-line title
-    add(f'<text x="1150" y="330" font-family="{SANS}" font-size="260" font-weight="bold" '
+    # ghosted part numeral + accent chip, top right
+    add(f'<text x="1152" y="268" font-family="{SANS}" font-size="220" font-weight="bold" '
         f'fill="{a}" fill-opacity="0.12" text-anchor="end">{p["n"]:02d}</text>')
-    add(f'<rect x="1098" y="66" width="28" height="28" fill="{a}"/>')
+    add(f'<rect x="1124" y="46" width="28" height="28" fill="{a}"/>')
 
-    # eyebrow — dx for the separator gaps, since SVG collapses literal whitespace
-    add(f'<text x="78" y="92" font-family="{MONO}" font-size="21" font-weight="bold" '
-        f'letter-spacing="4.5" fill="{INK}">NOVALAKE'
+    # eyebrow
+    add(f'<text x="78" y="72" font-family="{MONO}" font-size="20" font-weight="bold" '
+        f'letter-spacing="4.2" fill="{INK}">NOVALAKE'
         f'<tspan dx="12" fill="{FOOTER_INK}">·</tspan>'
         f'<tspan dx="12" fill="{a}">PART {p["n"]} OF 8</tspan></text>')
 
-    # title — one-line titles drop 30px so the block stays balanced against the
-    # bottom-anchored chip strip instead of floating high
-    y_title = 198 + (2 - len(title)) * 30
+    # title / rule / deck — one-line titles drop so the diagram stays put
+    y_title = 138 + (2 - len(title)) * 30
     y = y_title
     for line in title:
-        add(f'<text x="78" y="{y}" font-family="{SANS}" font-size="54" font-weight="bold" '
+        add(f'<text x="78" y="{y}" font-family="{SANS}" font-size="48" font-weight="bold" '
             f'fill="{INK}">{escape(line)}</text>')
-        y += 68
-    y_rule = y_title + (len(title) - 1) * 68 + 40
-    add(f'<rect x="78" y="{y_rule}" width="96" height="5" fill="{a}"/>')
-
-    # deck
-    y = y_rule + 58
+        y += 60
+    y_rule = y_title + (len(title) - 1) * 60 + 30
+    add(f'<rect x="78" y="{y_rule}" width="88" height="5" fill="{a}"/>')
+    y = y_rule + 44
     for line in deck:
-        add(f'<text x="78" y="{y}" font-family="{SANS}" font-size="24" '
+        add(f'<text x="78" y="{y}" font-family="{SANS}" font-size="21" '
             f'fill="{DECK_INK}">{escape(line)}</text>')
-        y += 38
+        y += 30
 
-    # ---- architecture strip -------------------------------------------------
-    # Same six-stage map on all eight posters; only the highlight moves. Read
-    # across the series it animates the build, left to right.
-    lit = set(p.get("lit", []))
-    mid = set(p.get("mid", []))
-    rail_on = p.get("rail", False)
-    nw, ngap, ny, nh = 132, 20, 478, 46
-
-    # CI/CD control plane, drawn above the data plane it deploys
-    rail_ink = a if rail_on else SERIES_INK
-    add(f'<text x="78" y="452" font-family="{MONO}" font-size="15" letter-spacing="2.2" '
-        f'fill="{rail_ink}">CI/CD · GITHUB ACTIONS → BUNDLE DEPLOY</text>')
-    add(f'<line x1="78" y1="462" x2="970" y2="462" stroke="{a if rail_on else "#DAD5C7"}" '
-        f'stroke-width="1.4" stroke-dasharray="5 5"/>')
-
-    for i, stage in enumerate(STAGES):
-        x = 78 + i * (nw + ngap)
-        if stage in lit:
-            dash = ' stroke-dasharray="7 4" stroke="#FAF6EC" stroke-width="2"' \
-                if p.get("dashed") else ''
-            add(f'<rect x="{x}" y="{ny}" width="{nw}" height="{nh}" rx="8" fill="{a}"{dash}/>')
-            ink, weight = CREAM, ' font-weight="bold"'
-        elif stage in mid:
-            add(f'<rect x="{x}" y="{ny}" width="{nw}" height="{nh}" rx="8" fill="none" '
-                f'stroke="{a}" stroke-width="1.8"/>')
-            ink, weight = a, ''
-        else:
-            add(f'<rect x="{x}" y="{ny}" width="{nw}" height="{nh}" rx="8" fill="none" '
-                f'stroke="{CHIP_OFF_STROKE}" stroke-width="1.6"/>')
-            ink, weight = CHIP_OFF_INK, ''
-        add(f'<text x="{x + nw/2}" y="{ny + 30}" font-family="{MONO}" font-size="16"{weight} '
-            f'letter-spacing="1.4" fill="{ink}" text-anchor="middle">{stage}</text>')
-        if i < len(STAGES) - 1:
-            cx = x + nw + ngap / 2 - 3
-            add(f'<path d="M{cx},{ny + nh/2 - 5} L{cx + 6},{ny + nh/2} L{cx},{ny + nh/2 + 5}" '
-                f'fill="none" stroke="{CHIP_OFF_STROKE}" stroke-width="2" '
-                f'stroke-linecap="round" stroke-linejoin="round"/>')
-
-    # what the highlighted slice does in this part
-    add(f'<text x="78" y="554" font-family="{SANS}" font-size="20" '
+    # caption — what the highlighted slice does in this part
+    add(f'<text x="78" y="{y + 12}" font-family="{SANS}" font-size="19" font-weight="bold" '
         f'fill="{a}">{escape(p["cap"])}</text>')
 
+    # ---- architecture ------------------------------------------------------
+    X0, X1 = 78, 1152
+    rail_on, dab_on, dlt_on = p.get("rail"), p.get("dab"), p.get("dlt")
+
+    # band 1 — CI/CD control plane (dashed, sits outside the data flow)
+    ry, rh = 352, 66
+    r_stroke = a if rail_on else OFF_STROKE
+    add(f'<rect x="{X0}" y="{ry}" width="{X1-X0}" height="{rh}" rx="9" fill="none" '
+        f'stroke="{r_stroke}" stroke-width="1.4" stroke-dasharray="7 5"/>')
+    add(f'<text x="{X0+14}" y="{ry+17}" font-family="{MONO}" font-size="10" '
+        f'letter-spacing="1.8" fill="{a if rail_on else OFF_INK}">CI/CD CONTROL PLANE'
+        f'<tspan dx="8" fill="{SERIES_INK}" letter-spacing="0">· not part of the data flow below</tspan></text>')
+    bw, bgap = 320, 42
+    for i, (t, s) in enumerate(CICD):
+        bx = X0 + 16 + i * (bw + bgap)
+        box(add, bx, ry + 24, bw, 32, "lit" if rail_on else "off", a, t, [s], ts=11, ss=8)
+        if i < 2:
+            arrow(add, bx + bw + 8, bx + bw + bgap - 8, ry + 40)
+
+    # band 2 — Unity Catalog container holding the data plane
+    uy, uh = 430, 178
+    add(f'<rect x="{X0}" y="{uy}" width="{X1-X0}" height="{uh}" rx="10" fill="none" '
+        f'stroke="{PANEL_STROKE}" stroke-width="1.3"/>')
+    add(f'<text x="{X0+14}" y="{uy+18}" font-family="{SANS}" font-size="10" '
+        f'font-style="italic" fill="{SERIES_INK}">'
+        f'Unity Catalog · catalog: novalake — governs every table below</text>')
+
+    nw, ngap, ny, nh = 156, 20, uy + 44, 70
+    xs = []
+    for i, (key, t, subs) in enumerate(STAGES):
+        x = X0 + 16 + i * (nw + ngap)
+        xs.append(x)
+        st = state_of(key)
+        add(f'<text x="{x}" y="{ny-8}" font-family="{MONO}" font-size="9.5" '
+            f'font-weight="bold" letter-spacing="1.3" '
+            f'fill="{a if st != "off" else OFF_INK}">{key}</text>')
+        box(add, x, ny, nw, nh, st, a, t, subs, ts=11,
+            dashed=bool(p.get("dashed")) and st == "lit")
+        if i:
+            arrow(add, xs[i-1] + nw + 4, x - 4, ny + nh / 2)
+
+    # the DLT comparison branch, hanging off Bronze under the Silver column
+    dy = ny + nh + 16
+    dstate = "lit" if dlt_on else "off"
+    dx0, dxw = xs[2] - 22, nw * 2 + ngap + 44
+    add(f'<path d="M{xs[1]+nw/2},{ny+nh} L{xs[1]+nw/2},{dy+16} L{dx0-6},{dy+16}" fill="none" '
+        f'stroke="{a if dlt_on else OFF_STROKE}" stroke-width="1.3" stroke-dasharray="5 4"/>')
+    box(add, dx0, dy, dxw, 34, dstate, a, "Lakeflow Declarative Pipelines",
+        ["re-implements the Silver transaction slice — comparison only"], ts=11, ss=8,
+        dashed=True)
+
+    # band 3 — DAB orchestration
+    oy = 638
+    box(add, X0, oy, X1 - X0, 40, "lit" if dab_on else "off", a,
+        "ORCHESTRATION — Databricks Asset Bundle (DAB)",
+        ["one job graph: bronze ingest ▸ dbt (Silver / Gold) — plus dashboard, "
+         "vector search & DLT pipeline as bundle resources"], ts=12, ss=8.5)
+
     # footer
-    add(f'<text x="78" y="594" font-family="{MONO}" font-size="19" '
+    add(f'<text x="78" y="716" font-family="{MONO}" font-size="18" '
         f'fill="{FOOTER_INK}">{escape(FOOTER)}</text>')
-    add(f'<text x="1126" y="594" font-family="{MONO}" font-size="17" fill="{SERIES_INK}" '
+    add(f'<text x="1152" y="716" font-family="{MONO}" font-size="16" fill="{SERIES_INK}" '
         f'text-anchor="end">9 tagged releases · solo-built</text>')
 
     add('</svg>')

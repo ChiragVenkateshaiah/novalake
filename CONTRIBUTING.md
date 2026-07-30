@@ -9,6 +9,28 @@ artifact.
 - One branch per module: `feat/v0.1-bronze`, `feat/v0.2-silver`, etc.
 - Merge to `main` only when that module's Definition of Done (below) is met.
 
+## Merging — never squash
+
+**Always use a regular merge commit. Never squash, never rebase-merge**
+(`gh pr merge --merge`, or the "Create a merge commit" button — not
+`--squash`, not `--rebase`).
+
+The reason is traceability, and this repo has already paid for learning it.
+The story of a phase is not in its final diff — it is in the sequence of
+commits that got there: the fix that was applied and then reverted, the
+review pass that changed an approach mid-branch, the second attempt that
+worked. `docs/articles/novalake-full-story.md` names this directly: the
+earliest PRs landed as merge commits, the later ones got squashed or
+rebased on the way in, and *"the raw commit graph alone doesn't reliably
+preserve every reverted fix"* as a result. Squashing collapses exactly the
+part that is worth keeping.
+
+A merge commit costs one extra line in `git log --oneline`. Use
+`git log --first-parent` when you want the phase-level view instead.
+
+This applies to every merge, including one-line fixes — a rule with an
+"unless it's small" exemption is a rule that erodes.
+
 ## Commits
 [Conventional Commits](https://www.conventionalcommits.org/):
 ```

@@ -54,6 +54,11 @@ From `CONTRIBUTING.md`, verbatim:
   `feat(silver): explode line_items and flatten payment_method struct`,
   `fix(bronze): correct rescued-data column name`, `docs(v0.2): fill
   validation + knowledge check sections`.
+- **Always use a regular merge commit. Never squash, never rebase-merge**
+  (`gh pr merge --merge`, not `--squash`, not `--rebase`). The reason is
+  traceability: the story of a phase is the sequence of commits that got
+  there — the fix applied then reverted, the approach changed mid-branch —
+  not the final diff. Applies to every merge, including one-line fixes.
 - Tag `main` at the end of each module: `v0.0`, `v0.1`, `v0.2`, ... Tag
   message = one-line summary of what now works.
 

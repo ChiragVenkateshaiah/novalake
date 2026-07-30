@@ -20,6 +20,21 @@ Source:     docs/articles/novalake-full-story.md — lines 433-505, verbatim
 
 **Where we are.** [Part 6](LINK-PART-6) rewrote both generators for GB scale without losing their deliberate defect catalog, ran a ~1.01M-event pilot, and set the real target at ~5,000,000 events based on measured pilot cost rather than the number in the plan. Then the full run happened, and `dbt test` came back with three errors that weren't in the baseline.
 
+## The architecture, and where this part sits
+
+The cover strip lights **`GOLD`**, with `BRONZE` outlined behind it. After six parts of building outward, this one stops extending the architecture and starts measuring it.
+
+The target is `gold_gb.fct_transactions` — the GB-scale replica of the widest fact table in the warehouse, at **2,138,809 rows**. `bronze_gb.raw_events_multiline` is the secondary target, because the compaction experiment needs a genuinely fragmented table and Gold's was already tidy. Both live in the parallel `_gb` schemas Part 6 built.
+
+**What's in scope is set by what serverless actually exposes**, and that boundary is unusually sharp:
+
+- **In reach:** query profiles, `EXPLAIN` plans, liquid clustering, `OPTIMIZE` and compaction, join strategy, skew, UDF elimination. All of it is the query-and-data-layout layer — properties of how bytes sit in Delta files and how Photon plans against them.
+- **Structurally out of reach:** executor and shuffle tuning, cluster sizing, disk cache, RDD caching. Serverless exposes no Spark UI, no sizing knobs, and locks most `spark.conf` settings.
+
+That's a real architectural constraint, not a scoping preference, and I'd rather name it than write unverifiable paragraphs about executor memory in an environment that forbids setting it.
+
+The measurement apparatus matters as much as the target. Metrics come from `system.query.history` (read bytes, files, cache provenance) cross-checked against `DESCRIBE DETAIL`, `OPTIMIZE`'s own returned metrics, and `EXPLAIN` plan nodes. Almost every trap below is a case of one of those instruments lying while the others told the truth.
+
 ---
 
 ## The generator bug that duplicated 122,592 rows

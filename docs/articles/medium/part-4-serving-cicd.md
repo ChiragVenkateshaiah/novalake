@@ -20,6 +20,21 @@ Source:     docs/articles/novalake-full-story.md — lines 206-266, verbatim
 
 **Where we are.** [Part 3](LINK-PART-3) closed with Gold: 101 dbt models, conformed dimensions built only where identity genuinely conforms, and every rate computed from raw counts at a declared grain rather than averaged from another rate column. That last rule was written for this phase. Here is where the consumer stops being a human analyst and starts being a model.
 
+## The architecture, and where this part sits
+
+This is the one part that lights up **two different planes at once**, which is why they're bundled together here.
+
+**On the data plane**, the cover strip lights `SERVING` — the first stage whose consumer is a person rather than a pipeline. Two consumers hang off Gold, both reading the same conformed tables and neither transforming anything:
+
+- a **Genie space**, which is natural-language-to-SQL over the Gold schema, carrying 7 numbered instructions, 6 certified question→SQL pairs, and a hand-curated column visibility list;
+- an **AI/BI dashboard**, 3 pages and 11 datasets, each dataset a query against Gold.
+
+The critical detail is that neither one adds a transformation. Every number they can produce is already defined in a `metric_*` model from Part 3. A shared question→SQL catalog, written *before* either consumer existed, is what stops them drifting into two different definitions of the same metric.
+
+**On the control plane**, this is where the top rail of the diagram becomes real. GitHub Actions runs `bundle validate` on every PR as a required check, and `bundle deploy` on merge to `main` — authenticating as a scoped service principal, deliberately without `--auto-approve` so a destructive plan fails safe. The dashboard is a bundle resource, so the artifact this part builds is also the artifact CI/CD deploys.
+
+That overlap is the whole story of this part. The serving layer had to be defended against a model that writes better SQL than the guardrails written to constrain it. And the deploy pipeline that ships it had to be defended against itself — because `bundle deploy` proposed deleting the dashboard, and because a passing `bundle validate` turned out to prove considerably less than I'd assumed.
+
 ---
 
 ## Serving — designing guardrails against a model that's better at SQL than the guardrail

@@ -20,6 +20,20 @@ Source:     docs/articles/novalake-full-story.md — lines 270-333, verbatim
 
 **Where we are.** [Part 4](LINK-PART-4) built the serving layer — a Genie space with guardrails, one of them enforced by removing a column rather than instructing against it, plus a CI pipeline that turned out to have been silently failing for three merges. This part puts a RAG agent and a supervisor agent on top of the same Gold tables, and is where the gated review-then-act model from [Part 1](LINK-PART-1) earned its keep.
 
+## The architecture, and where this part sits
+
+The cover strip lights **GENAI**, the last stage of the spine, with `GOLD` outlined behind it — because the defining constraint of this layer is that it introduces **no new data**. Every embedding, every retrieved paragraph, every SQL answer traces back to the same Gold tables Part 3 built.
+
+The layer has two independent surfaces:
+
+**A RAG agent.** Two Gold columns of free text feed two Vector Search Delta Sync indexes — support tickets in one, product reviews in the other, deliberately never combined, so a review paragraph structurally cannot surface as evidence for a support question. Both indexes share one Storage-Optimized endpoint. On top sits a custom MLflow `ResponsesAgent` built on a LangGraph `StateGraph`, holding the two retrievers as two separate tools, deployed to Model Serving and registered in Unity Catalog with versioned rollback.
+
+**A text-to-SQL agent.** A Supervisor Agent wrapping the Part 4 Genie space as pure orchestration — no new tables, no new indexes.
+
+One architectural wrinkle shaped the build more than expected. Every Gold model up to this point was a dbt **view**, and Vector Search's Delta Sync requires a physical Delta **table** with Change Data Feed enabled. So two materialized tables had to be carved out of an otherwise all-view layer — the only place in the project where a downstream consumer's requirement reached back and changed how an upstream layer materializes.
+
+Everything below — the corpus decision, the prompt leak, the scorer bugs, the non-deterministic SQL — happens inside those two surfaces.
+
 ---
 
 ## GenAI — an agent that leaked its own system prompt

@@ -20,6 +20,22 @@ Source:     docs/articles/novalake-full-story.md — lines 120-202, verbatim
 
 **Where we are.** [Part 2](LINK-PART-2) ended with Bronze landed — 7,105 rows, 51 inferred leaf fields, two of them collapsed to string by Spark's own inference — and a schema-drift audit that sorted the damage into five distinct problem categories. Those five categories are the scope of this phase. Silver resolves them; Gold conforms what's left.
 
+## The architecture, and where this part sits
+
+The cover strip lights **SILVER → GOLD** — the two middle stages, and the only place in the whole build where the shape of the architecture is itself the main finding.
+
+Silver is not one pipeline. It is **two**, running side by side, and the diagram's single "SILVER" box hides that deliberately-doubled structure. The NDJSON source and the multiline source get completely separate model lineages: separate staging models, separate dedup, separate per-event-type transforms, separate dead-letter splits. They never touch each other. Everything is a dbt model — SQL, version-controlled, tested — materialized as views on top of the Bronze Delta table.
+
+Gold is where the two branches finally converge, and the convergence is selective rather than wholesale. It has three shapes of model:
+
+- **Conformed dimensions** (`dim_customers`, `dim_merchants`, `dim_date`) — built only where identity genuinely conforms across the two sources.
+- **Facts** (`fct_transactions`, `fct_refunds`, `fct_support_tickets`, …) — each unioning the two branches, but only after flattening to shared scalar columns.
+- **Metric rollups** (`metric_*`) — pre-aggregated at a declared grain, each one carrying the underlying counts alongside its rates.
+
+The design rule that runs through both stages: **a union is a claim that two things are the same, and every such claim gets verified per field rather than assumed from a matching column name.** Silver keeps the two sources apart because their payload shapes genuinely differ. Gold joins them only where their identifiers genuinely conform — checked against the generator source code, not inferred from the schema.
+
+That third model shape, the metric rollups, exists specifically to serve the layer in Part 4, where the consumer stops being a human.
+
 ---
 
 ## Silver — two pipelines that describe the same business, deliberately never unified

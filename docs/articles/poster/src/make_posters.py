@@ -39,54 +39,82 @@ MONO = "JetBrains Mono"
 
 FOOTER = "Databricks Free Edition · PySpark · dbt · Unity Catalog · DAB"
 
+# The six data-plane stages, drawn on every poster. The highlight advances
+# left-to-right across the series so the strip carries the story: a reader who
+# sees part 6 knows at a glance which layer it touches and what came before.
+STAGES = ["SOURCES", "BRONZE", "SILVER", "GOLD", "SERVING", "GENAI"]
+
+# Per-part highlight state:
+#   lit    — stages this part actually builds or measures (solid accent)
+#   mid    — stages shown as context, outlined in accent rather than filled
+#   rail   — light the CI/CD control plane above the data plane
+#   dashed — mark a lit stage as a parallel/comparison implementation
+#   cap    — one line saying what the highlighted slice does in this part
+
 PARTS = [
     dict(
-        n=1, slug="collaboration-model", accent="#47566E", chip="COLLAB",
+        n=1, slug="collaboration-model", accent="#47566E",
         title=["The platform is the", "only source of truth"],
         deck=["A green checkmark that was quietly wrong — and the four-stage",
               "escalation that governed an AI agent's access for nine releases."],
+        lit=[], mid=STAGES, rail=True,
+        cap="Every layer below, deployed through one written gate",
     ),
     dict(
-        n=2, slug="bronze", accent="#B07D3A", chip="BRONZE",
+        n=2, slug="bronze", accent="#B07D3A",
         title=["Bronze, and the", "confidently wrong fix"],
         deck=["51 inferred leaf fields, two of them lying — and an audit tool",
               "whose own null filter silently never fired."],
+        lit=["SOURCES", "BRONZE"],
+        cap="Raw JSON → Delta. Schema-on-read: drops nothing, restructures nothing",
     ),
     dict(
-        n=3, slug="silver-gold", accent="#A98A16", chip="SILVER·GOLD",
+        n=3, slug="silver-gold", accent="#A98A16",
         title=["Silver and Gold"],
         deck=["Two pipelines describing the same business, deliberately never",
               "unified. Conformance verified per field, not assumed."],
+        lit=["SILVER", "GOLD"],
+        cap="Two parallel pipelines, unified only at Gold — 101 dbt models",
     ),
     dict(
-        n=4, slug="serving-cicd", accent="#2E8C80", chip="SERVE·CI",
+        n=4, slug="serving-cicd", accent="#2E8C80",
         title=["Serving and CI/CD"],
         deck=["Guardrails against a model better at SQL than the guardrail —",
               "then a green checkmark that was quietly wrong."],
+        lit=["SERVING"], rail=True,
+        cap="Genie space + AI/BI dashboard on Gold, deployed by GitHub Actions",
     ),
     dict(
-        n=5, slug="genai", accent="#6B5AA0", chip="GENAI",
+        n=5, slug="genai", accent="#6B5AA0",
         title=["The agent that leaked", "its own system prompt"],
         deck=["The first injection probe anyone would try, run against a careful,",
               "rule-numbered system prompt. It worked."],
+        lit=["GENAI"], mid=["GOLD"],
+        cap="Two Vector Search indexes and an agent over the same Gold tables",
     ),
     dict(
-        n=6, slug="dlt-vs-dbt", accent="#4F7C52", chip="DLT·SCALE",
+        n=6, slug="dlt-vs-dbt", accent="#4F7C52",
         title=["DLT versus dbt, and", "getting to GB scale"],
         deck=["Three negative results and one that mattered — then rewriting",
               "both generators without losing their deliberate defects."],
+        lit=["SILVER"], dashed=True, mid=["SOURCES", "BRONZE"],
+        cap="A Silver slice rebuilt in DLT alongside dbt, then everything at GB scale",
     ),
     dict(
-        n=7, slug="four-experiments", accent="#C2711F", chip="TUNING",
+        n=7, slug="four-experiments", accent="#C2711F",
         title=["Four experiments that", "produced numbers"],
         deck=["122,592 duplicated rows, an 86% improvement caused by nothing,",
               "and a result cache that matched on meaning, not text."],
+        lit=["GOLD"], mid=["BRONZE"],
+        cap="gold_gb.fct_transactions at 2,138,809 rows — the optimization target",
     ),
     dict(
-        n=8, slug="what-i-take", accent="#1B2A4A", chip="RESULTS",
+        n=8, slug="what-i-take", accent="#1B2A4A",
         title=["The one that", "didn't resolve"],
         deck=["Clustering quality 0.0, three remediation attempts that didn't",
               "unstick it, and why the failures are the deliverable."],
+        lit=["SILVER", "GOLD"],
+        cap="Skew on gold_gb, the UDF on silver_gb — where the build stops, and why",
     ),
 ]
 
@@ -117,7 +145,7 @@ def poster_svg(p):
 
     # title — one-line titles drop 30px so the block stays balanced against the
     # bottom-anchored chip strip instead of floating high
-    y_title = 208 + (2 - len(title)) * 30
+    y_title = 198 + (2 - len(title)) * 30
     y = y_title
     for line in title:
         add(f'<text x="78" y="{y}" font-family="{SANS}" font-size="54" font-weight="bold" '
@@ -133,28 +161,52 @@ def poster_svg(p):
             f'fill="{DECK_INK}">{escape(line)}</text>')
         y += 38
 
-    # 8-chip progress strip — filled chip position is legible even at 320px
-    cx, cy, size, gap = 78, 452, 46, 14
-    for i in range(1, 9):
-        x = cx + (i - 1) * (size + gap)
-        on = i == p["n"]
-        if on:
-            add(f'<rect x="{x}" y="{cy}" width="{size}" height="{size}" rx="9" fill="{a}"/>')
-            add(f'<text x="{x + size/2}" y="{cy + 31}" font-family="{MONO}" font-size="19" '
-                f'font-weight="bold" fill="{CREAM}" text-anchor="middle">{i}</text>')
-            add(f'<text x="{x + size/2}" y="{cy + size + 30}" font-family="{MONO}" '
-                f'font-size="16" font-weight="bold" letter-spacing="2.4" fill="{a}" '
-                f'text-anchor="middle">{escape(p["chip"])}</text>')
+    # ---- architecture strip -------------------------------------------------
+    # Same six-stage map on all eight posters; only the highlight moves. Read
+    # across the series it animates the build, left to right.
+    lit = set(p.get("lit", []))
+    mid = set(p.get("mid", []))
+    rail_on = p.get("rail", False)
+    nw, ngap, ny, nh = 132, 20, 478, 46
+
+    # CI/CD control plane, drawn above the data plane it deploys
+    rail_ink = a if rail_on else SERIES_INK
+    add(f'<text x="78" y="452" font-family="{MONO}" font-size="15" letter-spacing="2.2" '
+        f'fill="{rail_ink}">CI/CD · GITHUB ACTIONS → BUNDLE DEPLOY</text>')
+    add(f'<line x1="78" y1="462" x2="970" y2="462" stroke="{a if rail_on else "#DAD5C7"}" '
+        f'stroke-width="1.4" stroke-dasharray="5 5"/>')
+
+    for i, stage in enumerate(STAGES):
+        x = 78 + i * (nw + ngap)
+        if stage in lit:
+            dash = ' stroke-dasharray="7 4" stroke="#FAF6EC" stroke-width="2"' \
+                if p.get("dashed") else ''
+            add(f'<rect x="{x}" y="{ny}" width="{nw}" height="{nh}" rx="8" fill="{a}"{dash}/>')
+            ink, weight = CREAM, ' font-weight="bold"'
+        elif stage in mid:
+            add(f'<rect x="{x}" y="{ny}" width="{nw}" height="{nh}" rx="8" fill="none" '
+                f'stroke="{a}" stroke-width="1.8"/>')
+            ink, weight = a, ''
         else:
-            add(f'<rect x="{x}" y="{cy}" width="{size}" height="{size}" rx="9" fill="none" '
+            add(f'<rect x="{x}" y="{ny}" width="{nw}" height="{nh}" rx="8" fill="none" '
                 f'stroke="{CHIP_OFF_STROKE}" stroke-width="1.6"/>')
-            add(f'<text x="{x + size/2}" y="{cy + 31}" font-family="{MONO}" font-size="19" '
-                f'fill="{CHIP_OFF_INK}" text-anchor="middle">{i}</text>')
+            ink, weight = CHIP_OFF_INK, ''
+        add(f'<text x="{x + nw/2}" y="{ny + 30}" font-family="{MONO}" font-size="16"{weight} '
+            f'letter-spacing="1.4" fill="{ink}" text-anchor="middle">{stage}</text>')
+        if i < len(STAGES) - 1:
+            cx = x + nw + ngap / 2 - 3
+            add(f'<path d="M{cx},{ny + nh/2 - 5} L{cx + 6},{ny + nh/2} L{cx},{ny + nh/2 + 5}" '
+                f'fill="none" stroke="{CHIP_OFF_STROKE}" stroke-width="2" '
+                f'stroke-linecap="round" stroke-linejoin="round"/>')
+
+    # what the highlighted slice does in this part
+    add(f'<text x="78" y="554" font-family="{SANS}" font-size="20" '
+        f'fill="{a}">{escape(p["cap"])}</text>')
 
     # footer
-    add(f'<text x="78" y="592" font-family="{MONO}" font-size="19" '
+    add(f'<text x="78" y="594" font-family="{MONO}" font-size="19" '
         f'fill="{FOOTER_INK}">{escape(FOOTER)}</text>')
-    add(f'<text x="1126" y="592" font-family="{MONO}" font-size="17" fill="{SERIES_INK}" '
+    add(f'<text x="1126" y="594" font-family="{MONO}" font-size="17" fill="{SERIES_INK}" '
         f'text-anchor="end">9 tagged releases · solo-built</text>')
 
     add('</svg>')

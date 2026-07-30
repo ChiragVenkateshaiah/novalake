@@ -20,6 +20,16 @@ Source:     docs/articles/novalake-full-story.md — lines 337-431, verbatim
 
 **Where we are.** Back in [Part 2](LINK-PART-2), Lakeflow Declarative Pipelines got moved out of the main build path and deferred to a later phase, to be re-implemented and compared directly against dbt — because silently dropping it would have killed a stated learning goal without a recorded reason. This is that phase. It's also where the data stops being 5 MB, because optimization findings at that size are noise.
 
+## The architecture, and where this part sits
+
+The cover strip lights `SILVER` **with a dashed border** — the only part in the series drawn that way, because this is the one phase that doesn't extend the architecture. It duplicates a slice of it, on purpose, to measure the difference.
+
+**The DLT comparison is a parallel branch, not a replacement.** A four-model Silver slice — staging → dedup → transactions → clean/DLQ split, NDJSON transactions only — gets re-implemented in Lakeflow Declarative Pipelines and written into `_dlt`-suffixed schemas that sit alongside the dbt-built ones. Same Bronze source, same business logic, two independent implementations, neither overwriting the other. That parallelism is what makes row-for-row parity checkable at all: both tables exist at once, so the comparison is a query rather than an argument.
+
+**The GB-scale work duplicates the architecture a second way**, along a different axis. Rather than growing the existing tables, the whole spine gets a parallel `_gb` schema set — `bronze_gb`, `silver_gb`, `gold_gb` — carrying the same 101 models against ~1,000x the data. The original small-scale tables stay untouched and queryable throughout.
+
+So by the end of this part the diagram has three coexisting copies of the same logic: the original dbt spine, a DLT re-implementation of one Silver slice, and a full GB-scale replica. Nothing was migrated. Everything was duplicated, measured, and kept — which is also why an undocumented per-schema **table count** quota turned into a real design constraint.
+
 ---
 
 ## DLT versus dbt — a comparison that produced three negative results and one that mattered

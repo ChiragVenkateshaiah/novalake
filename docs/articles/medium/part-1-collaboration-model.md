@@ -45,6 +45,22 @@ It is complete. Tagged `v0.9`. That's a deliberate terminus, not an abandonment 
 
 ---
 
+## The architecture, and where this part sits
+
+The diagram above has three horizontal bands, and the distinction between them is what makes the rest of this series legible.
+
+**The data plane** is the left-to-right spine: two synthetic generators write raw JSON into a Unity Catalog Volume (the landing zone), PySpark ingests it to Bronze as Delta, ~80 dbt models resolve it through Silver, ~22 more conform it into Gold, and two consumers sit on top of Gold — a Genie space and an AI/BI dashboard for humans, a Vector Search + agent layer for the GenAI surface. Each of the seven parts that follow lights up one segment of that spine.
+
+**The control plane** sits above it and never touches data. GitHub Actions authenticates as a scoped service principal and runs `databricks bundle deploy`. That's the only sanctioned path from a merged PR to a changed workspace.
+
+**Unity Catalog** wraps everything below, governing every table in the spine.
+
+The thing worth noticing is that **the Databricks Asset Bundle covers the entire diagram from the first phase onward** — the bronze ingest job, the dbt tasks, the dashboard, the vector search resources and the DLT pipeline are all bundle resources in one job graph, not a pile of separately-clicked artifacts. That single fact is what makes this part's subject matter tractable: because every layer deploys through one mechanism, the AI access question reduces to one question — who is allowed to run `bundle deploy`, and under what review — rather than a different answer per service.
+
+Which is exactly what the four-stage escalation below is an answer to.
+
+---
+
 ## Part I: The collaboration model, because it's the part people get wrong
 
 Most "I built X with AI" writeups have exactly two settings: *the AI did everything* or *the AI is a fancy autocomplete*. Neither is useful. What I actually ran was a four-stage escalation where each stage had a written trigger, a written scope, and a written log.

@@ -20,6 +20,18 @@ Source:     docs/articles/novalake-full-story.md — lines 507-566, verbatim
 
 **Where we are.** [Part 7](LINK-PART-7) covered experiments 8.1 through 8.4 — baseline, liquid clustering (including an 86% "improvement" that turned out to be a cache artifact), compaction, and join strategy. Two experiments remain. Neither produced a clean win, and that's most of why they're worth writing up.
 
+## The architecture, and where this part sits
+
+The cover strip lights **`SILVER` and `GOLD`** together — the last two experiments straddle them. Skew and clustering are measured on a scratch copy of `gold_gb.fct_transactions`; the UDF experiment runs against `silver_gb.int_transactions_clean.country_raw`, 1,367,811 rows, because that's where the project's highest-complexity transformation macro actually lives.
+
+Both experiments needed something the architecture **didn't have**, and that's the honest architectural note of this part. There was no skew — both generators drew merchant IDs uniformly — and there were no UDFs anywhere in the repo, because every transformation up to this point used native SQL macros. So both conditions had to be constructed: skew as a permanent, default-off generator flag, and the UDF as a deliberate Python reimplementation of an existing macro.
+
+That is worth being explicit about. These two experiments measure **artifacts I built in order to measure them**, not organic properties of the system. Labelling them that way costs nothing and is the difference between a benchmark and a demo.
+
+The UDF experiment also has an execution-context requirement that's genuinely architectural: it had to run on a real serverless PySpark job rather than the SQL warehouse, because a SQL-warehouse Python UDF has different execution semantics and would never surface the `BatchEvalPython` plan node the experiment exists to observe.
+
+After that, the series closes on where this architecture stops — and why the boundary is the platform's, not the effort's.
+
 ---
 
 ## Six experiments, five results, one open question (continued)

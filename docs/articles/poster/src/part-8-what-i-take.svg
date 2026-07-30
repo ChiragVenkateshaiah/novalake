@@ -4,28 +4,31 @@
 <text x="1150" y="330" font-family="DejaVu Sans" font-size="260" font-weight="bold" fill="#1B2A4A" fill-opacity="0.12" text-anchor="end">08</text>
 <rect x="1098" y="66" width="28" height="28" fill="#1B2A4A"/>
 <text x="78" y="92" font-family="JetBrains Mono" font-size="21" font-weight="bold" letter-spacing="4.5" fill="#1B2A4A">NOVALAKE<tspan dx="12" fill="#8B909B">·</tspan><tspan dx="12" fill="#1B2A4A">PART 8 OF 8</tspan></text>
-<text x="78" y="208" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#1B2A4A">The one that</text>
-<text x="78" y="276" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#1B2A4A">didn't resolve</text>
-<rect x="78" y="316" width="96" height="5" fill="#1B2A4A"/>
-<text x="78" y="374" font-family="DejaVu Sans" font-size="24" fill="#46536B">Clustering quality 0.0, three remediation attempts that didn't</text>
-<text x="78" y="412" font-family="DejaVu Sans" font-size="24" fill="#46536B">unstick it, and why the failures are the deliverable.</text>
-<rect x="78" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="101.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">1</text>
-<rect x="138" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="161.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">2</text>
-<rect x="198" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="221.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">3</text>
-<rect x="258" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="281.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">4</text>
-<rect x="318" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="341.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">5</text>
-<rect x="378" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="401.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">6</text>
-<rect x="438" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
-<text x="461.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">7</text>
-<rect x="498" y="452" width="46" height="46" rx="9" fill="#1B2A4A"/>
-<text x="521.0" y="483" font-family="JetBrains Mono" font-size="19" font-weight="bold" fill="#FAF6EC" text-anchor="middle">8</text>
-<text x="521.0" y="528" font-family="JetBrains Mono" font-size="16" font-weight="bold" letter-spacing="2.4" fill="#1B2A4A" text-anchor="middle">RESULTS</text>
-<text x="78" y="592" font-family="JetBrains Mono" font-size="19" fill="#8B909B">Databricks Free Edition · PySpark · dbt · Unity Catalog · DAB</text>
-<text x="1126" y="592" font-family="JetBrains Mono" font-size="17" fill="#A9A395" text-anchor="end">9 tagged releases · solo-built</text>
+<text x="78" y="198" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#1B2A4A">The one that</text>
+<text x="78" y="266" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#1B2A4A">didn't resolve</text>
+<rect x="78" y="306" width="96" height="5" fill="#1B2A4A"/>
+<text x="78" y="364" font-family="DejaVu Sans" font-size="24" fill="#46536B">Clustering quality 0.0, three remediation attempts that didn't</text>
+<text x="78" y="402" font-family="DejaVu Sans" font-size="24" fill="#46536B">unstick it, and why the failures are the deliverable.</text>
+<text x="78" y="452" font-family="JetBrains Mono" font-size="15" letter-spacing="2.2" fill="#A9A395">CI/CD · GITHUB ACTIONS → BUNDLE DEPLOY</text>
+<line x1="78" y1="462" x2="970" y2="462" stroke="#DAD5C7" stroke-width="1.4" stroke-dasharray="5 5"/>
+<rect x="78" y="478" width="132" height="46" rx="8" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="144.0" y="508" font-family="JetBrains Mono" font-size="16" letter-spacing="1.4" fill="#9A9486" text-anchor="middle">SOURCES</text>
+<path d="M217.0,496.0 L223.0,501.0 L217.0,506.0" fill="none" stroke="#CFC9B9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="230" y="478" width="132" height="46" rx="8" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="296.0" y="508" font-family="JetBrains Mono" font-size="16" letter-spacing="1.4" fill="#9A9486" text-anchor="middle">BRONZE</text>
+<path d="M369.0,496.0 L375.0,501.0 L369.0,506.0" fill="none" stroke="#CFC9B9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="382" y="478" width="132" height="46" rx="8" fill="#1B2A4A"/>
+<text x="448.0" y="508" font-family="JetBrains Mono" font-size="16" font-weight="bold" letter-spacing="1.4" fill="#FAF6EC" text-anchor="middle">SILVER</text>
+<path d="M521.0,496.0 L527.0,501.0 L521.0,506.0" fill="none" stroke="#CFC9B9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="534" y="478" width="132" height="46" rx="8" fill="#1B2A4A"/>
+<text x="600.0" y="508" font-family="JetBrains Mono" font-size="16" font-weight="bold" letter-spacing="1.4" fill="#FAF6EC" text-anchor="middle">GOLD</text>
+<path d="M673.0,496.0 L679.0,501.0 L673.0,506.0" fill="none" stroke="#CFC9B9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="686" y="478" width="132" height="46" rx="8" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="752.0" y="508" font-family="JetBrains Mono" font-size="16" letter-spacing="1.4" fill="#9A9486" text-anchor="middle">SERVING</text>
+<path d="M825.0,496.0 L831.0,501.0 L825.0,506.0" fill="none" stroke="#CFC9B9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="838" y="478" width="132" height="46" rx="8" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="904.0" y="508" font-family="JetBrains Mono" font-size="16" letter-spacing="1.4" fill="#9A9486" text-anchor="middle">GENAI</text>
+<text x="78" y="554" font-family="DejaVu Sans" font-size="20" fill="#1B2A4A">Skew on gold_gb, the UDF on silver_gb — where the build stops, and why</text>
+<text x="78" y="594" font-family="JetBrains Mono" font-size="19" fill="#8B909B">Databricks Free Edition · PySpark · dbt · Unity Catalog · DAB</text>
+<text x="1126" y="594" font-family="JetBrains Mono" font-size="17" fill="#A9A395" text-anchor="end">9 tagged releases · solo-built</text>
 </svg>

@@ -20,6 +20,20 @@ Source:     docs/articles/novalake-full-story.md — lines 56-116, verbatim
 
 **Where we are.** [Part 1](LINK-PART-1) covered what NovaLake is — a Databricks lakehouse built end to end on Free Edition, raw events through Bronze, Silver, Gold, Serving and a GenAI layer, shipped as nine tagged releases — and the four-stage escalation that governed how much access the AI agent got at each phase. This part is the first layer of actual data, where the tooling starts telling you things that aren't true.
 
+## The architecture, and where this part sits
+
+The cover strip shows the six stages of the data plane. This part lights the first two: **SOURCES → BRONZE**.
+
+Concretely, that's a four-hop path. Two Python generators emit synthetic payments events — one as newline-delimited JSON, one as a pretty-printed JSON array of paginated API export pages. Both write into `novalake.bronze.landing`, a **Unity Catalog Volume**, and the raw JSON stops there: it is never committed to git, so only the generators and their data dictionaries are version-controlled. `src/ingest.py` then reads the Volume with PySpark and writes Delta into `novalake.bronze.raw_events`.
+
+Two architectural choices govern everything in this part.
+
+**PySpark here, dbt later.** Bronze is the one layer where the input is genuinely nested, polymorphic and malformed — 3–4 levels of nesting, a field that's a struct 97% of the time and a bare string the rest. That's where Spark's DataFrame API earns its place over SQL. From Silver onward the work is set-based transformation, which is dbt's job. The boundary between those two tools is the boundary between this part and the next.
+
+**Bronze enforces nothing.** No schema, no drops, no restructuring — add `_source_file` and `_ingested_at`, write Delta, stop. Every defect in the source survives into the table intact, on purpose, because a Bronze layer that cleans data destroys the evidence you need to know what was wrong with it.
+
+That second choice is precisely why the schema inference below is load-bearing: if Bronze doesn't enforce a schema, Spark infers one, and what it infers is the first thing in this project that turned out to be lying.
+
 ---
 
 ## Bronze — where the schema tells you it's fine and isn't

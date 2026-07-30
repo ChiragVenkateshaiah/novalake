@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1260" viewBox="0 0 1200 630">
+<rect width="1200" height="630" fill="#FAF6EC"/>
+<rect x="0" y="0" width="16" height="630" fill="#C2711F"/>
+<text x="1150" y="330" font-family="DejaVu Sans" font-size="260" font-weight="bold" fill="#C2711F" fill-opacity="0.12" text-anchor="end">07</text>
+<rect x="1098" y="66" width="28" height="28" fill="#C2711F"/>
+<text x="78" y="92" font-family="JetBrains Mono" font-size="21" font-weight="bold" letter-spacing="4.5" fill="#1B2A4A">NOVALAKE<tspan dx="12" fill="#8B909B">·</tspan><tspan dx="12" fill="#C2711F">PART 7 OF 8</tspan></text>
+<text x="78" y="208" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#1B2A4A">Four experiments that</text>
+<text x="78" y="276" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#1B2A4A">produced numbers</text>
+<rect x="78" y="316" width="96" height="5" fill="#C2711F"/>
+<text x="78" y="374" font-family="DejaVu Sans" font-size="24" fill="#46536B">122,592 duplicated rows, an 86% improvement caused by nothing,</text>
+<text x="78" y="412" font-family="DejaVu Sans" font-size="24" fill="#46536B">and a result cache that matched on meaning, not text.</text>
+<rect x="78" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="101.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">1</text>
+<rect x="138" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="161.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">2</text>
+<rect x="198" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="221.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">3</text>
+<rect x="258" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="281.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">4</text>
+<rect x="318" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="341.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">5</text>
+<rect x="378" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="401.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">6</text>
+<rect x="438" y="452" width="46" height="46" rx="9" fill="#C2711F"/>
+<text x="461.0" y="483" font-family="JetBrains Mono" font-size="19" font-weight="bold" fill="#FAF6EC" text-anchor="middle">7</text>
+<text x="461.0" y="528" font-family="JetBrains Mono" font-size="16" font-weight="bold" letter-spacing="2.4" fill="#C2711F" text-anchor="middle">TUNING</text>
+<rect x="498" y="452" width="46" height="46" rx="9" fill="none" stroke="#CFC9B9" stroke-width="1.6"/>
+<text x="521.0" y="483" font-family="JetBrains Mono" font-size="19" fill="#9A9486" text-anchor="middle">8</text>
+<text x="78" y="592" font-family="JetBrains Mono" font-size="19" fill="#8B909B">Databricks Free Edition · PySpark · dbt · Unity Catalog · DAB</text>
+<text x="1126" y="592" font-family="JetBrains Mono" font-size="17" fill="#A9A395" text-anchor="end">9 tagged releases · solo-built</text>
+</svg>
